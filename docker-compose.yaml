@@ -7,6 +7,12 @@ services:
     build: ./backend-flask
     ports:
       - "4567:4567"
+    healthcheck:
+      test: curl --fail -s http://localhost:4567/ || exit 1
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
     volumes:
       - ./backend-flask:/backend-flask
   frontend-react-js:
@@ -15,6 +21,12 @@ services:
     build: ./frontend-react-js
     ports:
       - "3000:3000"
+    healthcheck:
+      test: curl --fail -s http://localhost:3000/ || exit 1
+      interval: 1m30s
+      timeout: 30s
+      retries: 5
+      start_period: 30s
     volumes:
       - ./frontend-react-js:/frontend-react-js
 
