@@ -70,13 +70,13 @@ gp env HONEYCOMB_SERVICE_NAME="Cruddur"
 
 ### Getting CloudWatch logs configured
 
-Add theCloudwatch libraries to our python environment
+Add CloudWatch libraries to our python environment
 
 ```
 watchtower
 ```
 
-From a python terminal install the new opentelemetry libraries
+From a python terminal install the new CloudWatch libraries
 ```
 pip install -r requirements.txt
 ```
@@ -116,5 +116,74 @@ AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
 AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
 ```
 
-#### Results in CloudWatch
+#### CloudWatch Logs for Crudder
 ![Image of CloudWatch Logs](assests/2_Week_Cloudwatch_Logs.png)
+
+### Rollbar 
+
+Create a new project in [Rollbar](https://www.rollbar.com) called Crudder
+
+Add Rollbar libraries to our python environment
+
+```
+blinker
+rollbar
+```
+
+From a python terminal install the new Rollbar libraries
+```
+pip install -r requirements.txt
+```
+
+Add the Rollbar access token to our environment:
+```
+export ROLLBAR_ACCESS_TOKEN=""
+gp env ROLLBAR_ACCESS_TOKEN=""
+```
+
+Within the **app.py** script, import Rollbar functions:
+
+```python
+import rollbar
+import rollbar.contrib.flask
+from flask import got_request_exception
+```
+
+Within the **app.py** script, configure logging into Rollbar:
+```python
+rollbar_access_token = os.getenv('ROLLBAR_ACCESS_TOKEN')
+@app.before_first_request
+def init_rollbar():
+    """init rollbar module"""
+    rollbar.init(
+        # access token
+        rollbar_access_token,
+        # environment name
+        'production',
+        # server root directory, makes tracebacks prettier
+        root=os.path.dirname(os.path.realpath(__file__)),
+        # flask already sets up logging
+        allow_logging_basic_config=False)
+
+    # send exceptions from `app` to rollbar, using flask's signal system.
+    got_request_exception.connect(rollbar.contrib.flask.report_exception, app)
+```
+
+Within the **app.py** script, add an endpoint to test rollbar:
+```python
+@app.route('/rollbar/test')
+def rollbar_test():
+    rollbar.report_message('Hello World!', 'warning')
+    return "Hello World!"
+```
+
+Add Rollbar access token to docker compose:
+```Dockerfile
+ROLLBAR_ACCESS_TOKEN: "${ROLLBAR_ACCESS_TOKEN}"
+```
+
+#### Rollbar Dashboard
+![Image of Rollabar Dashboard](assests/2_Week_Rollbar_Dashboard.png)
+
+#### Rollbar Items
+![Image of Rollabar Items](assests/2_Week_Rollbar_Items.png)
