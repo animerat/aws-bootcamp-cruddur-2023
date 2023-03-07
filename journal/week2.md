@@ -19,7 +19,7 @@ From a python terminal install the new opentelemetry libraries
 pip install -r requirements.txt
 ```
 
-Within the **app.py** script, import Opentelemtry functions:
+Within the `app.py` script, import Opentelemtry functions:
 
 ```python
 from opentelemetry import trace
@@ -30,7 +30,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 ```
 
-Within the **app.py** script, initialize tracing and exporter to send data to Honeycomb:
+Within the `app.py` script, initialize tracing and exporter to send data to Honeycomb:
 ```python
 provider = TracerProvider()
 processor = BatchSpanProcessor(OTLPSpanExporter())
@@ -39,7 +39,7 @@ trace.set_tracer_provider(provider)
 tracer = trace.get_tracer(__name__)
 ```
 
-Within the **app.py** script, initialize instrumentation with Flask:
+Within the `app.py` script, initialize instrumentation with Flask:
 ```python
 app = Flask(__name__)
 FlaskInstrumentor().instrument_app(app)
@@ -81,7 +81,7 @@ From a python terminal install the new CloudWatch libraries
 pip install -r requirements.txt
 ```
 
-Within the **app.py** script, import Cloudwatch functions:
+Within the `app.py` script, import Cloudwatch functions:
 
 ```python
 import watchtower
@@ -89,7 +89,7 @@ import logging
 from time import strftime
 ```
 
-Within the **app.py** script, configure Logger to user Cloudwatch:
+Within the `app.py` script, configure Logger to user Cloudwatch:
 ```python
 LOGGER = logging.getLogger(__name__)
 LOGGER.setLevel(logging.DEBUG)
@@ -100,7 +100,7 @@ LOGGER.addHandler(cw_handler)
 LOGGER.info("some message")
 ```
 
-Within the **app.py** script, configure an after request to have Logger send data to Cloudwatch:
+Within the `app.py` script, configure an after request to have Logger send data to Cloudwatch:
 ```python
 @app.after_request
 def after_request(response):
@@ -141,7 +141,7 @@ export ROLLBAR_ACCESS_TOKEN=""
 gp env ROLLBAR_ACCESS_TOKEN=""
 ```
 
-Within the **app.py** script, import Rollbar functions:
+Within the `app.py` script, import Rollbar functions:
 
 ```python
 import rollbar
@@ -149,7 +149,7 @@ import rollbar.contrib.flask
 from flask import got_request_exception
 ```
 
-Within the **app.py** script, configure logging into Rollbar:
+Within the `app.py` script, configure logging into Rollbar:
 ```python
 rollbar_access_token = os.getenv('ROLLBAR_ACCESS_TOKEN')
 @app.before_first_request
@@ -169,7 +169,7 @@ def init_rollbar():
     got_request_exception.connect(rollbar.contrib.flask.report_exception, app)
 ```
 
-Within the **app.py** script, add an endpoint to test rollbar:
+Within the `app.py` script, add an endpoint to test rollbar:
 ```python
 @app.route('/rollbar/test')
 def rollbar_test():
@@ -187,3 +187,179 @@ ROLLBAR_ACCESS_TOKEN: "${ROLLBAR_ACCESS_TOKEN}"
 
 #### Rollbar Items
 ![Image of Rollabar Items](assests/2_Week_Rollbar_Items.png)
+
+### Getting X-Ray Configured
+
+Add the X-Raylibraries to our python environment
+
+```
+aws-xray-sdk
+```
+
+From a python terminal install the new X-Ray libraries
+```
+pip install -r requirements.txt
+```
+
+Within the `app.py` script, import X-Ray functions:
+
+```python
+from aws_xray_sdk.core import xray_recorder
+from aws_xray_sdk.ext.flask.middleware import XRayMiddleware
+```
+
+Within the `app.py` script, Configure X-Ray recorder and middleware:
+```python
+xray_url = os.getenv("AWS_XRAY_URL")
+xray_recorder.configure(service='backend-flask', dynamic_naming=xray_url)
+XRayMiddleware(app, xray_recorder)
+```
+
+
+Configure AWS-Region to send X-Ray logs to:
+```
+export AWS_REGION="us-west-2"
+gp env AWS_REGION="us-west-2"
+```
+
+### Setting AWS X-Ray Resources
+
+Add to `aws/json/xray.json`
+
+```json
+{
+  "SamplingRule": {
+      "RuleName": "Cruddur",
+      "ResourceARN": "*",
+      "Priority": 9000,
+      "FixedRate": 0.1,
+      "ReservoirSize": 5,
+      "ServiceName": "backend-flask",
+      "ServiceType": "*",
+      "Host": "*",
+      "HTTPMethod": "*",
+      "URLPath": "*",
+      "Version": 1
+  }
+}
+
+```
+
+From the, CLI create a X-Ray group call Crudder
+```
+FLASK_ADDRESS="https://4567-${GITPOD_WORKSPACE_ID}.${GITPOD_WORKSPACE_CLUSTER_HOST}"
+aws xray create-group \
+   --group-name "Cruddur" \
+   --filter-expression "service(\"backend-flask\")"
+```
+
+From the CLI, create a sampling rule using the xray.json
+```
+aws xray create-sampling-rule --cli-input-json file://aws/json/xray.json
+```
+
+### Add Daemon Service to Docker Compose
+
+```Dockerfile
+  xray-daemon:
+    image: "amazon/aws-xray-daemon"
+    environment:
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+      AWS_REGION: "us-west-2"
+    command:
+      - "xray -o -b xray-daemon:2000"
+    ports:
+      - 2000:2000/udp
+```
+
+Add environment variables to the backend-flask container in docker compose:
+```Dockerfile
+AWS_XRAY_URL: "*4567-${GITPOD_WORKSPACE_ID}.${GITPOD_WORKSPACE_CLUSTER_HOST}*"
+AWS_XRAY_DAEMON_ADDRESS: "xray-daemon:2000"
+```
+
+### Configuring X-Ray Segmentation
+
+Within the `app.py` script replace the /api/activities/home with the following:
+
+
+```python
+@app.route("/api/activities/home", methods=['GET'])
+@xray_recorder.capture('activities_home')
+def data_home():
+  data = HomeActivities.run()
+  return data, 200
+```
+Within the `app.py` script replace the /api/activities/@<string:handle> with the following:
+```python
+@app.route("/api/activities/@<string:handle>", methods=['GET'])
+@xray_recorder.capture('activities_users')
+def data_handle(handle):
+  model = UserActivities.run(handle)
+  if model['errors'] is not None:
+    return model['errors'], 422
+  else:
+    return model['data'], 200
+```
+Within the `app.py` script replace the /api/activities/@<string:handle> with the following:
+
+```python
+@app.route("/api/activities/<string:activity_uuid>", methods=['GET'])
+@xray_recorder.capture('activities_show')
+def data_show_activity(activity_uuid):
+  data = ShowActivity.run(activity_uuid=activity_uuid)
+  return data, 200
+```
+
+Within the `user_activities.py` script, import xray_recorder, create a segment called user_activities, create a subsegment called mock-data:
+
+```python
+
+from datetime import datetime, timedelta, timezone
+from aws_xray_sdk.core import xray_recorder
+class UserActivities:
+  def run(user_handle):
+    try:
+    # xray ---
+      segment = xray_recorder.begin_segment('user_activities')
+
+      model = {
+        'errors': None,
+        'data': None
+      }
+    
+
+      now = datetime.now(timezone.utc).astimezone()
+
+      if user_handle == None or len(user_handle) < 1:
+        model['errors'] = ['blank_user_handle']
+      else:
+        now = datetime.now()
+        results = [{
+          'uuid': '248959df-3079-4947-b847-9e0892d1bab4',
+          'handle':  'Andrew Brown',
+          'message': 'Cloud is fun!',
+          'created_at': (now - timedelta(days=1)).isoformat(),
+          'expires_at': (now + timedelta(days=31)).isoformat()
+        }]
+        model['data'] = results
+
+      subsegment = xray_recorder.begin_subsegment('mock-data')
+      # xray ---
+      dict = {
+        "now": now.isoformat(),
+        "results-size": len(model['data'])
+      }
+      subsegment.put_metadata('key', dict, 'namespace')
+      xray_recorder.end_subsegment()
+    finally:
+      xray_recorder.end_subsegment()
+    return model
+```
+
+#### X-Ray Traces
+![Image of X-Ray_Traces](assests/2_Week_XRay_Traces.png)
+
+#### X-Ray Traces with SubSegments
+![Image of X-Ray_Traces SubSegments](assests/2_Week_XRay_Traces_SubSegments.png)
