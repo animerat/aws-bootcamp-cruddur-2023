@@ -605,7 +605,7 @@ db = Db()
 ```
 ### Modified Home Activities.py 
 
-Remove the sql query and replace them by using the db.py library
+Refactored Create_Activities.py by using the db.py library
 ```python
 
 from datetime import datetime, timedelta, timezone
@@ -627,9 +627,9 @@ class HomeActivities:
     return results
 ```
 
-### Modified Home Activities.py 
+### Modified Create Activities.py 
 
-Remove the sql query and replace with by using the db.py library
+Refactored Create_Activities.py by using the db.py library
 
 ```python
   
