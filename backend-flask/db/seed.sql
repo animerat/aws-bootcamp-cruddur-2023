@@ -9,4 +9,4 @@ VALUES
     (SELECT uuid from public.users WHERE users.handle = 'andrewbrown' LIMIT 1),
     'This was imported as seed data!',
     current_timestamp + interval '10 day'
-  )
+  );
