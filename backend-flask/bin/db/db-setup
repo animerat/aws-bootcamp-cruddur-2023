@@ -1,4 +1,5 @@
 #! /usr/bin/bash
+
 -e # stop if it fails at any point
 
 #echo "==== db-setup"
@@ -13,4 +14,4 @@ source "$bin_path/db/db-drop"
 source "$bin_path/db/db-create"
 source "$bin_path/db/db-schema-load"
 source "$bin_path/db/db-seed"
-source "$bin_path/db/db-update_cognito_user_ids"
+python "$bin_path/db/db-update_cognito_user_ids"
