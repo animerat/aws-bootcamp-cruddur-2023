@@ -44,7 +44,6 @@ export default function ActivityForm(props) {
         } else {
           props.setMessages(current => [...current,data]);
         }
-        props.setMessages(current => [...current,data]);
       } else {
         console.log(res)
       }
