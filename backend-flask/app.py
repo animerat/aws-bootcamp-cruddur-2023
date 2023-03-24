@@ -125,6 +125,8 @@ def data_message_groups():
   access_token = extract_access_token(request.headers)
   try:
     claims = cognito_jwt_token.verify(access_token)
+    app.logger.debug("authenicated")
+    app.logger.debug("claims")
     cognito_user_id = claims['sub']
     model = MessageGroups.run(cognito_user_id=cognito_user_id)
     if model['errors'] is not None:
@@ -134,6 +136,7 @@ def data_message_groups():
   except TokenVerifyError as e:
     # unauthenicatied request
     app.logger.debug(e)
+    app.logger.debug("unauthenticated")
     return {}, 401
 
 @app.route("/api/messages/<string:message_group_uuid>", methods=['GET'])
@@ -164,8 +167,8 @@ def data_messages(message_group_uuid):
 @app.route("/api/messages", methods=['POST','OPTIONS'])
 @cross_origin()
 def data_create_message():
-  user_sender_handle = 'andrewbrown'
-  user_receiver_handle = request.json['user_receiver_handle']
+  user_receiver_handle = request.json['handle']
+  message_group_uuid = request.json['message_group_uuid']
   message = request.json['message']
 
   model = CreateMessage.run(message=message,user_sender_handle=user_sender_handle,user_receiver_handle=user_receiver_handle)
@@ -174,6 +177,9 @@ def data_create_message():
   else:
     return model['data'], 200
   return
+
+  
+
 
 @app.route("/api/activities/home", methods=['GET'])
 @xray_recorder.capture('activities_home')

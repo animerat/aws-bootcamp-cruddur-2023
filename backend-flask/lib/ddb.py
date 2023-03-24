@@ -22,7 +22,7 @@ class Ddb:
       'ScanIndexForward': False,
       'Limit': 20,
       'ExpressionAttributeValues': {
-        ':year':{'S':year},
+        ':year':{'S': year },
         ':pk': {'S': f"GRP#{my_user_uuid}"}
       }
     }
@@ -33,6 +33,7 @@ class Ddb:
     items = response['Items']
     
     print("items:", items)
+
     results = []
     for item in items:
       last_sent_at = item['sk']['S']
