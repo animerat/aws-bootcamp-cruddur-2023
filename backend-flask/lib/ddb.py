@@ -61,7 +61,7 @@ class Ddb:
       }
       response = client.query(**query_params)
       items = response['Items']
-      items.reverse()    
+      items.reverse()
       results = []
       for item in items:
         created_at = item['sk']['S']
