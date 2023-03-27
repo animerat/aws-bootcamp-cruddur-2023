@@ -896,7 +896,8 @@ LIMIT 1
 
 In `MessageGroupsPage.js` add the following:
 ```js
- try {
+ const loadMessageGroupsData = async () => {
+    try {
       const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/message_groups`
       const res = await fetch(backend_url, {
         headers: {
@@ -904,6 +905,16 @@ In `MessageGroupsPage.js` add the following:
         },
         method: "GET"
       });
+      let resJson = await res.json();
+      if (res.status === 200) {
+        setMessageGroups(resJson)
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  }; 
 ```
 
 In `MessageGroupPage.js` add the following:
@@ -1036,3 +1047,145 @@ backend-flask:
     environment:
       AWS_ENDPOINT_URL: "http://dynamodb-local:8000"
 ```
+
+## Show Conversation Between Two Users
+
+### Getting the Message UUID
+
+In `app.js', replace 
+
+```js
+{
+    path: "/messages/@:handle"
+    element: <MessageGroupPage />
+  },
+```
+with
+
+```js
+{
+    path: "/messages/:message_group_uuid",
+    element: <MessageGroupPage />
+  },
+```
+
+In `MessageGroupPage.js`, goto loadMessageGroupData section, replace wtih 
+```js
+ const loadMessageGroupData = async () => {
+    try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/messages/${params.message_group_uuid}`
+      const res = await fetch(backend_url, {headers: {
+        Authorization: `Bearer ${localStorage.getItem("access_token")}`
+      },
+        method: "GET"
+      });
+      let resJson = await res.json();
+      if (res.status === 200) {
+        setMessages(resJson)
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  }; 
+```
+
+In `MessageGroupItem.js`, replace the sections that starts with const classes
+
+```js
+const classes = () => {
+    let classes = ["message_group_item"];
+    if (params.message_group_uuid == props.message_group.uuid){
+      classes.push('active')
+    }
+    return classes.join(' ');
+  }
+
+  return (
+    <Link className={classes()} to={`/messages/`+props.message_group_uuid}>
+      <div className='message_group_avatar'></div>
+```
+
+In `app.py`, replace the section that includes the data_messages function:
+
+```python
+@app.route("/api/messages/<string:message_group_uuid>", methods=['GET'])
+def data_messages(message_group_uuid):
+  access_token = extract_access_token(request.headers)
+  try:
+    claims = cognito_jwt_token.verify(access_token)
+    # authenicatied request
+    app.logger.debug("authenicated")
+    app.logger.debug(claims)
+    cognito_user_id=claims['sub']
+    model = Messages.run(
+      cognito_user_id=cognito_user_id,
+      message_group_uuid=message_group_uuid
+    )
+    if model['errors'] is not None:
+      return model['errors'], 422
+    else:
+      return model['data'], 200
+  except TokenVerifyError as e:
+    # unauthenicatied request
+    app.logger.debug(e)
+    app.logger.debug("unauthenicated")
+    data = HomeActivities.run()
+    return {}, 401
+ ```
+ 
+ In `messages.py`:
+ 
+ ```python
+from datetime import datetime, timedelta, timezone
+from lib.ddb import Ddb
+from lib.db import db
+
+class Messages:
+  def run(message_group_uuid,cognito_user_id):
+    model = {
+      'errors': None,
+      'data': None
+    }
+    sql = db.template('users','uuid_from_cognito_user_id')
+    my_user_uuid = db.query_value(sql,{
+      'cognito_user_id': cognito_user_id
+    })
+
+    print(f"UUID: {my_user_uuid}")
+    ddb = Ddb.client()
+    data = Ddb.list_messages(ddb, message_group_uuid)
+    print("list_messages")
+    print(data)
+
+    model['data'] = data
+    return model
+```
+
+In `MessageGroupPage.js`:
+
+```
+const loadMessageGroupData = async () => {
+    try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/messages/${params.message_group_uuid}`
+      const res = await fetch(backend_url, {headers: {
+        Authorization: `Bearer ${localStorage.getItem("access_token")}`
+      },
+        method: "GET"
+      });
+      let resJson = await res.json();
+      if (res.status === 200) {
+        setMessages(resJson)
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  };
+```
+ 
+## Create Message
+
+
