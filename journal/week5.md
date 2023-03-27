@@ -30,7 +30,7 @@ else
 fi
 
 aws dynamodb delete-table $ENDPOINT_URL \
-  --table-name $TABLE_NAME
+  --table-name $TABLE_NAMEE
 ```
 
 ### Create a bash script called `\backend-flask\bin\ddb\list-tables` that will list all tables inside the DynamoDB under 
@@ -513,7 +513,7 @@ response = ddb.query(**query_params)
 print(json.dumps(response, sort_keys=True, indent=2))
 ```
 
-### Modified the print_sql function in `db.py`:
+### Modified the function in `db.py`:
 
 Add `params={}` to the print_sql function
 
@@ -523,9 +523,9 @@ Add `params={}` to the print_sql function
     no_color = '\033[0m'
     print(f'{cyan} SQL STATEMENT-[{title}]------{no_color}')
     print(sql,params)
-  def query_commit (self,sql,params={}):
-    self.print_sql('commit with returning',sql,params)
 ```
+
+**Note: You will need to add the params argument to all print_sql function calls**
 
 ### Add a function to return a single value in `db.py`
 
@@ -539,3 +539,500 @@ def query_value(self,sql,params={}):
         return json[0]
 ```
 
+## Fix `DB-DROP` script to only drop database if it exists
+
+```shell
+#! /usr/bin/bash
+
+NO_DB_CONNECTION_URL=$(sed 's/\/cruddur//g' <<<"$CONNECTION_URL")
+psql $NO_DB_CONNECTION_URL -c "drop database IF EXISTS cruddur;"
+```
+
+## Adding Cognito UUID into Development Postgres Database
+
+### Create Shell Script to List All Users in Cognito
+
+Under `backend-flask/bin/cognito`, create a file called `list-users`:
+
+```shell
+#!/usr/bin/env python3
+
+import boto3
+import os
+import json
+
+userpool_id = os.getenv("AWS_COGNITO_USER_POOL_ID")
+client = boto3.client('cognito-idp')
+params = {
+  'UserPoolId': userpool_id,
+  'AttributesToGet': [
+      'preferred_username',
+      'sub'
+  ]
+}
+response = client.list_users(**params)
+users = response['Users']
+
+print(json.dumps(users, sort_keys=True, indent=2, default=str))
+
+dict_users = {}
+for user in users:
+  attrs = user['Attributes']
+  sub    = next((a for a in attrs if a["Name"] == 'sub'), None)
+  handle = next((a for a in attrs if a["Name"] == 'preferred_username'), None)
+  dict_users[handle['Value']] = sub['Value']
+
+print(json.dumps(dict_users, sort_keys=True, indent=2, default=str))
+```
+
+### Create Shell Script to Add UUID From Cognito Into Development Database
+
+Under `backend-flask/bin/db`, create a file called `db-update_cognito_user_ids`:
+
+```shell
+#!/usr/bin/env python3
+
+import boto3
+import os
+import sys
+
+current_path = os.path.dirname(os.path.abspath(__file__))
+parent_path = os.path.abspath(os.path.join(current_path, '..', '..'))
+sys.path.append(parent_path)
+from lib.db import db
+
+def update_users_with_cognito_user_id(handle,sub):
+  sql = """
+    UPDATE public.users
+    SET cognito_user_id = %(sub)s
+    WHERE
+      users.handle = %(handle)s;
+  """
+  db.query_commit(sql,{
+    'handle' : handle,
+    'sub' : sub
+  })
+
+def get_cognito_user_ids():
+  userpool_id = os.getenv("AWS_COGNITO_USER_POOL_ID")
+  client = boto3.client('cognito-idp')
+  params = {
+    'UserPoolId': userpool_id,
+    'AttributesToGet': [
+        'preferred_username',
+        'sub'
+    ]
+  }
+  response = client.list_users(**params)
+  users = response['Users']
+  dict_users = {}
+  for user in users:
+    attrs = user['Attributes']
+    sub    = next((a for a in attrs if a["Name"] == 'sub'), None)
+    handle = next((a for a in attrs if a["Name"] == 'preferred_username'), None)
+    dict_users[handle['Value']] = sub['Value']
+  return dict_users
+
+
+users = get_cognito_user_ids()
+
+for handle, sub in users.items():
+  print('----',handle,sub)
+  update_users_with_cognito_user_id(
+    handle=handle,
+    sub=sub
+  )
+```
+### Modify Development Database setup scripts
+
+Add the following line to `db-setup` under `/backend-flask/bin/db`
+
+```shll
+python "$bin_path/db/db-update_cognito_user_ids"
+```
+**Note: if you get import: unable to open X server `' @ error/import.c/ImportImageCommand/359.`
+
+## Create a DynamoDB python Library
+
+Under `backend-flask/lib/ddb` create a file called `ddb.py`
+
+```python
+import boto3
+import sys
+from datetime import datetime, timedelta, timezone
+import uuid
+import os
+import botocore.exceptions
+
+class Ddb:
+  def client():
+    endpoint_url = os.getenv("AWS_ENDPOINT_URL")
+    if endpoint_url:
+      attrs = { 'endpoint_url': endpoint_url }
+    else:
+      attrs = {}
+    dynamodb = boto3.client('dynamodb',**attrs)
+    return dynamodb
+  def list_message_groups(client,my_user_uuid):
+    year = str(datetime.now().year)
+    table_name = 'cruddur-messages'
+    query_params = {
+      'TableName': table_name,
+      'KeyConditionExpression': 'pk = :pk AND begins_with(sk,:year)',
+      'ScanIndexForward': False,
+      'Limit': 20,
+      'ExpressionAttributeValues': {
+        ':year':{'S': year },
+        ':pk': {'S': f"GRP#{my_user_uuid}"}
+      }
+    }
+    print('query-params:',query_params)
+
+    # query the table
+    response = client.query(**query_params)
+    items = response['Items']
+    
+    print("items:", items)
+
+    results = []
+    for item in items:
+      last_sent_at = item['sk']['S']
+      results.append({
+        'uuid': item['message_group_uuid']['S'],
+        'display_name': item['user_display_name']['S'],
+        'handle': item['user_handle']['S'],
+        'message': item['message']['S'],
+        'created_at': last_sent_at
+      })
+    return results
+  def list_messages(client,message_group_uuid):
+      year = str(datetime.now().year)
+      table_name = 'cruddur-messages'
+      query_params = {
+        'TableName': table_name,
+        'KeyConditionExpression': 'pk = :pk AND begins_with(sk,:year)',
+        'ScanIndexForward': False,
+        'Limit': 20,
+        'ExpressionAttributeValues': {
+          ':year': {'S': year },
+          ':pk': {'S': f"MSG#{message_group_uuid}"}
+        }
+      }
+      response = client.query(**query_params)
+      items = response['Items']
+      items.reverse()
+      results = []
+      for item in items:
+        created_at = item['sk']['S']
+        results.append({
+          'uuid': item['message_uuid']['S'],
+          'display_name': item['user_display_name']['S'],
+          'handle': item['user_handle']['S'],
+          'message': item['message']['S'],
+          'created_at': created_at
+        })
+      return results
+  def create_message(client,message_group_uuid, message, my_user_uuid, my_user_display_name, my_user_handle):
+    now = datetime.now(timezone.utc).astimezone().isoformat()
+    created_at = now
+    message_uuid = str(uuid.uuid4())
+
+    record = {
+      'pk':   {'S': f"MSG#{message_group_uuid}"},
+      'sk':   {'S': created_at },
+      'message': {'S': message},
+      'message_uuid': {'S': message_uuid},
+      'user_uuid': {'S': my_user_uuid},
+      'user_display_name': {'S': my_user_display_name},
+      'user_handle': {'S': my_user_handle}
+    }
+    # insert the record into the table
+    table_name = 'cruddur-messages'
+    response = client.put_item(
+      TableName=table_name,
+      Item=record
+    )
+    # print the response
+    print(response)
+    return {
+      'message_group_uuid': message_group_uuid,
+      'uuid': my_user_uuid,
+      'display_name': my_user_display_name,
+      'handle':  my_user_handle,
+      'message': message,
+      'created_at': created_at
+    }
+  def create_message_group(client, message,my_user_uuid, my_user_display_name, my_user_handle, other_user_uuid, other_user_display_name, other_user_handle):
+    print('== create_message_group.1')
+    table_name = 'cruddur-messages'
+
+    message_group_uuid = str(uuid.uuid4())
+    message_uuid = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).astimezone().isoformat()
+    last_message_at = now
+    created_at = now
+    print('== create_message_group.2')
+
+    my_message_group = {
+      'pk': {'S': f"GRP#{my_user_uuid}"},
+      'sk': {'S': last_message_at},
+      'message_group_uuid': {'S': message_group_uuid},
+      'message': {'S': message},
+      'user_uuid': {'S': other_user_uuid},
+      'user_display_name': {'S': other_user_display_name},
+      'user_handle':  {'S': other_user_handle}
+    }
+
+    print('== create_message_group.3')
+    other_message_group = {
+      'pk': {'S': f"GRP#{other_user_uuid}"},
+      'sk': {'S': last_message_at},
+      'message_group_uuid': {'S': message_group_uuid},
+      'message': {'S': message},
+      'user_uuid': {'S': my_user_uuid},
+      'user_display_name': {'S': my_user_display_name},
+      'user_handle':  {'S': my_user_handle}
+    }
+
+    print('== create_message_group.4')
+    message = {
+      'pk':   {'S': f"MSG#{message_group_uuid}"},
+      'sk':   {'S': created_at },
+      'message': {'S': message},
+      'message_uuid': {'S': message_uuid},
+      'user_uuid': {'S': my_user_uuid},
+      'user_display_name': {'S': my_user_display_name},
+      'user_handle': {'S': my_user_handle}
+    }
+
+    items = {
+      table_name: [
+        {'PutRequest': {'Item': my_message_group}},
+        {'PutRequest': {'Item': other_message_group}},
+        {'PutRequest': {'Item': message}}
+      ]
+    }
+
+    try:
+      print('== create_message_group.try')
+      # Begin the transaction
+      response = client.batch_write_item(RequestItems=items)
+      return {
+        'message_group_uuid': message_group_uuid
+      }
+    except botocore.exceptions.ClientError as e:
+      print('== create_message_group.error')
+      print(e)
+```
+
+## Implementing Conversations using DynamoDB
+
+### Adding Cognito User Pool to our Application
+
+In `app.py`:
+
+```python
+@app.route("/api/message_groups", methods=['GET'])
+def data_message_groups():
+  access_token = extract_access_token(request.headers)
+  try:
+    claims = cognito_jwt_token.verify(access_token)
+    app.logger.debug("authenicated")
+    app.logger.debug("claims")
+    cognito_user_id = claims['sub']
+    model = MessageGroups.run(cognito_user_id=cognito_user_id)
+    if model['errors'] is not None:
+      return model['errors'], 422
+    else:
+      return model['data'], 200
+  except TokenVerifyError as e:
+    # unauthenicatied request
+    app.logger.debug(e)
+    app.logger.debug("unauthenticated")
+    return {}, 401
+```
+
+In `message_groups.py`:
+
+```python
+from datetime import datetime, timedelta, timezone
+
+from lib.ddb import Ddb
+from lib.db import db
+
+class MessageGroups:
+  def run(cognito_user_id):
+    model = {
+      'errors': None,
+      'data': None
+    }
+
+    sql = db.template('users','uuid_from_cognito_user_id')
+    my_user_uuid = db.query_value(sql,{
+      'cognito_user_id': cognito_user_id
+    })
+    print(f"UUID: {my_user_uuid}")
+    ddb = Ddb.client()
+    data = Ddb.list_message_groups(ddb, my_user_uuid)
+    print("list_message_groups:",data)
+
+    model['data'] = data
+    return model
+```
+
+Create a new folder called `users` under `/backend-flask/db/sql`
+Create a new file called  `uuid_from_cognito_user_id.sql`
+
+```SQL
+SELECT 
+  users.uuid
+FROM public.users
+WHERE 
+  users.cognito_user_id = %(cognito_user_id)s
+LIMIT 1
+```
+
+### Resolve No Token Provided Error Message
+
+In `MessageGroupsPage.js` add the following:
+```js
+ try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/message_groups`
+      const res = await fetch(backend_url, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token")}`
+        },
+        method: "GET"
+      });
+```
+
+In `MessageGroupPage.js` add the following:
+```js
+   try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/message_groups`
+      const res = await fetch(backend_url, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("access_token")}`
+        },
+        method: "GET"
+      });
+```
+In `MessageFrom.js` add the following:
+
+```js
+const res = await fetch(backend_url, {
+        method: "POST",
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem("access_token")}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+```
+#### Checking User Authentication Against Cognito
+
+Create a new folder called `lib` under `/frontend-react-js/src/lib`
+Create a new file called `CheckAuth.js`, which will check user authentication against Cognito
+
+```js
+import { Auth } from 'aws-amplify';
+
+const checkAuth = async (setUser) => {
+    Auth.currentAuthenticatedUser({
+      // Optional, By default is false. 
+      // If set to true, this call will send a 
+      // request to Cognito to get the latest user data
+      bypassCache: false 
+    })
+    .then((user) => {
+      console.log('user',user);
+      return Auth.currentAuthenticatedUser()
+    }).then((cognito_user) => {
+        setUser({
+          display_name: cognito_user.attributes.name,
+          handle: cognito_user.attributes.preferred_username
+        })
+    })
+    .catch((err) => console.log(err));
+  };
+
+  export default checkAuth;
+```
+
+In the `HomeFeedPage.js`, replace the following:
+
+```js
+  const checkAuth = async () => {
+    Auth.currentAuthenticatedUser({
+      // Optional, By default is false. 
+      // If set to true, this call will send a 
+      // request to Cognito to get the latest user data
+      bypassCache: false 
+    })
+    .then((user) => {
+      console.log('user',user);
+      return Auth.currentAuthenticatedUser()
+    }).then((cognito_user) => {
+        setUser({
+          display_name: cognito_user.attributes.name,
+          handle: cognito_user.attributes.preferred_username
+        })
+    })
+    .catch((err) => console.log(err));
+  };
+```
+
+with
+
+```js
+import checkAuth from '../lib/CheckAuth';
+
+React.useEffect(()=>{
+    //prevents double call
+    if (dataFetchedRef.current) return;
+    dataFetchedRef.current = true;
+
+    loadData();
+    checkAuth(setUser);
+  }, [])
+```
+
+In the `MessageGroupPage.js` and `MessageGroupsPage.js`, replace the following:
+
+```js
+const checkAuth = async () => {
+    console.log('checkAuth')
+    // [TODO] Authenication
+    if (Cookies.get('user.logged_in')) {
+      setUser({
+        display_name: Cookies.get('user.name'),
+        handle: Cookies.get('user.username')
+      })
+    }
+  };
+```
+
+with:
+
+```js
+import checkAuth from '../lib/CheckAuth';
+
+React.useEffect(()=>{
+    //prevents double call
+    if (dataFetchedRef.current) return;
+    dataFetchedRef.current = true;
+
+    loadData();
+    checkAuth(setUser);
+  }, [])
+```
+
+### Setup DynamoDB Endpoint
+
+Modify `dev-docker-compose.yaml` file to use development Dyanmodb container:
+
+```yaml
+backend-flask:
+    container_name: backend_flask
+    environment:
+      AWS_ENDPOINT_URL: "http://dynamodb-local:8000"
+```
