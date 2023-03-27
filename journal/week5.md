@@ -1694,4 +1694,196 @@ def create_message_group(client, message,my_user_uuid, my_user_display_name, my_
       print(e)
  ```
 
+## Setting up DynamoDB Stream
 
+Make sure backend_flask container is pointing to AWS DynamoDB instead of the local DynamoDB Container by commentin out the `AWS_ENDPOINT_URL`
+
+```yaml
+version: "3.8"
+services:
+  backend-flask:
+    container_name: backend_flask
+    environment:
+      #AWS_ENDPOINT_URL: "http://dynamodb-local:8000"
+      #CONNECTION_URL: "${PROD_CONNECTION_URL}"
+ ```
+ 
+### Adding GlobalSecondaryIndexes 
+
+Add the GlobalSecondaryIndexes and Message Group UUID to  `schema-load`
+
+```sql
+response = ddb.create_table(
+  TableName=table_name,
+  AttributeDefinitions=[
+    {
+      'AttributeName': 'message_group_uuid',
+      'AttributeType': 'S'
+    },
+    {
+      'AttributeName': 'pk',
+      'AttributeType': 'S'
+    },
+    {
+      'AttributeName': 'sk',
+      'AttributeType': 'S'
+    },
+  ],
+  KeySchema=[
+    {
+      'AttributeName': 'pk',
+      'KeyType': 'HASH'
+    },
+    {
+      'AttributeName': 'sk',
+      'KeyType': 'RANGE'
+    },
+  ],
+  GlobalSecondaryIndexes=[{
+    'IndexName':'message-group-sk-index',
+    'KeySchema':[{
+      'AttributeName': 'message_group_uuid',
+      'KeyType': 'HASH'
+    },
+    {
+      'AttributeName': 'sk',
+      'KeyType': 'RANGE'
+    }],
+    'Projection': {
+      'ProjectionType': 'ALL'
+    },
+    'ProvisionedThroughput': {
+      'ReadCapacityUnits': 5,
+      'WriteCapacityUnits': 5
+    },
+  }
+  ],
+  BillingMode='PROVISIONED',
+  ProvisionedThroughput={
+      'ReadCapacityUnits': 5,
+      'WriteCapacityUnits': 5
+  }
+)
+```
+### Enable Streams in DyanmoDB
+ 
+Turn on DynamoDBStreams and set to New Image:
+ 
+![Image of DynamoDB Stream](assests/5_Week_AWS_DynamoDB_Streams.png)
+
+### Create a Gateway VPC Endpoint for DynamoDB
+
+Create a Gateway VPC Endpoint for DynamoDB.  Under service name make sure to select `dynamodb`, it will select the service based on your region.
+
+![Image of VPC Endpoint](assests/5_Week_AWS_VPC_Endpoint.png)
+
+
+### Configure DynamoDB Stream Lambda Function
+
+Create a lambda function called cruddur-post-confirmation. Set the tun time to Python 3.9
+
+![Image of AWS Lambda Function](assests/5_Week_AWS_Lambda_Function.png)
+   
+To Configure the VPC for Lambda
+ 
+Select the default VPC:
+
+![Image of AWS Lambda VPC](assests/4_Week_AWS_Lambda_VPC.png)
+
+Select at least 2 subnets
+ 
+![Image of AWS Lambda Subnet](assests/4_Week_AWS_Lambda_Subnet.png)
+
+Select the Default Security Group
+
+![Image of AWS Lambda Subnet](assests/4_Week_AWS_Lambda_SG.png)
+
+Use the following code to create a lambda function:
+
+```python
+import json
+import boto3
+from boto3.dynamodb.conditions import Key, Attr
+
+dynamodb = boto3.resource(
+ 'dynamodb',
+ region_name='us-west-2',
+ endpoint_url="http://dynamodb.us-west-2.amazonaws.com"
+)
+
+def lambda_handler(event, context):
+  print('event-data',event)
+  
+  eventName = event['Records'][0]['eventName']
+  if  (eventName == 'REMOVE'):
+    print ('skip REMOVE event')
+    return
+  pk = event['Records'][0]['dynamodb']['Keys']['pk']['S']
+  sk = event['Records'][0]['dynamodb']['Keys']['sk']['S']
+  if pk.startswith('MSG#'):
+    group_uuid = pk.replace("MSG#","")
+    message = event['Records'][0]['dynamodb']['NewImage']['message']['S']
+    print("GRUP ===>",group_uuid,message)
+    
+    table_name = 'cruddur-messages'
+    index_name = 'message-group-sk-index'
+    table = dynamodb.Table(table_name)
+    data = table.query(
+      IndexName=index_name,
+      KeyConditionExpression=Key('message_group_uuid').eq(group_uuid)
+    )
+    print("RESP ===>",data['Items'])
+    
+    # recreate the message group rows with new SK value
+    for i in data['Items']:
+      delete_item = table.delete_item(Key={'pk': i['pk'], 'sk': i['sk']})
+      print("DELETE ===>",delete_item)
+      
+      response = table.put_item(
+        Item={
+          'pk': i['pk'],
+          'sk': sk,
+          'message_group_uuid':i['message_group_uuid'],
+          'message':message,
+          'user_display_name': i['user_display_name'],
+          'user_handle': i['user_handle'],
+          'user_uuid': i['user_uuid']
+        }
+      )
+      print("CREATE ===>",response
+   ```
+   
+ ### Grant Cruddur Stream Role Permissions
+   
+ Add the AWS Managed `AWSLambdaInvocation-DynamoDB` policy to the Cruddur Messaging Stream Role
+   
+ Create an inline policy called `cruddur-messaging-stream-dynamodb` and attach to Cruddur Messaging Stream Role
+   
+   ```json
+   {
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VisualEditor0",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:Query"
+            ],
+            "Resource": [
+                "arn:aws:dynamodb:us-west-2:623491699425:table/cruddur-messages/index/message-group-sk-index",
+                "arn:aws:dynamodb:us-west-2:623491699425:table/cruddur-messages"
+            ]
+        }
+    ]
+}
+```
+   
+![Image of AWS IAM_Role](assests/5_Week_AWS_IAM_role.png)
+
+### Configure Trigger for Cruddur Messaging Stream Function
+
+Select DynamoDB service, then for the DynamoDB table select the Cruddur-Messages table.  Finally set the batch size to 1
+
+![Image of AWS Lambda Subnet](assests/5_Week_AWS_Lambda_Trigger.png)
