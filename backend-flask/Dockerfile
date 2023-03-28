@@ -1,4 +1,4 @@
-FROM python:3.10-slim-buster
+FROM 623491699425.dkr.ecr.us-west-2.amazonaws.com/cruddur-python:3.10-slim-buster
 
 #Set working directory to backend-flask inside container
 WORKDIR /backend-flask
@@ -13,7 +13,7 @@ RUN pip3 install -r requirements.txt
 COPY . .
 
 #Set Env Var
-ENV FLASK_ENV=development
+ENV FLASK_DEBUG=1
 
 #Set port for inter-container communication
 EXPOSE ${PORT}
