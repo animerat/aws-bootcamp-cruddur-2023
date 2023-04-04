@@ -1,0 +1,18 @@
+#! /usr/bin/bash
+
+-e # stop if it fails at any point
+
+#echo "==== db-setup"
+CYAN='\033[1;36m'
+NO_COLOR='\033[0m'
+LABEL="db-setup"
+printf "${CYAN}==== ${LABEL}${NO_COLOR}\n"
+
+ABS_PATH=$(readlink -f "$0")
+BIN_PATH=$(dirname $ABS_PATH)
+
+source "$BIN_PATH/db/db-drop"
+source "$BIN_PATH/db/db-create"
+source "$BIN_PATH/db/db-schema-load"
+source "$BIN_PATH/db/db-seed"
+python "$BIN_PATH/db/db-update_cognito_user_ids"
