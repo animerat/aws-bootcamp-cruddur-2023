@@ -1,4 +1,4 @@
-#! /usr/bin/bash
+#! /usr/DB/bash
 
 -e # stop if it fails at any point
 
@@ -9,10 +9,10 @@ LABEL="db-setup"
 printf "${CYAN}==== ${LABEL}${NO_COLOR}\n"
 
 ABS_PATH=$(readlink -f "$0")
-BIN_PATH=$(dirname $ABS_PATH)
+DB_PATH=$(dirname $ABS_PATH)
 
-source "$BIN_PATH/db/db-drop"
-source "$BIN_PATH/db/db-create"
-source "$BIN_PATH/db/db-schema-load"
-source "$BIN_PATH/db/db-seed"
-python "$BIN_PATH/db/db-update_cognito_user_ids"
+source "$DB_PATH/db/db-drop"
+source "$DB_PATH/db/db-create"
+source "$DB_PATH/db/db-schema-load"
+source "$DB_PATH/db/db-seed"
+python "$DB_PATH/db/db-update_cognito_user_ids"
