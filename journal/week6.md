@@ -857,5 +857,135 @@ aws ecs create-service --cli-input-json file://aws/json/service-backend-flask.js
 aws ecs create-service --cli-input-json file://aws/json/service-frontend-react-js.json
 ```
 
+## Create Connect Script to Frontend-React-Js at `/bin/frontend/connect`
 
+```sh
+#! /usr/bin/bash
+if [ -z "$1" ]; then
+  echo "No TASK_ID argument supplied eg ./bin/ecs/connect-to-frontend-react-js <task id>"
+  exit 1
+fi
+TASK_ID=$1
 
+CONTAINER_NAME=frontend-react-js
+
+echo "TASK ID : $TASK_ID"
+echo "Container Name: $CONTAINER_NAME"
+
+aws ecs execute-command  \
+--region $AWS_DEFAULT_REGION \
+--cluster cruddur \
+--task $TASK_ID \
+--container $CONTAINER_NAME \
+--command "/bin/sh" \
+--interactive
+```
+
+## Setting up Custom Domain with SSL
+
+### Create Hosed Zone in Route 53
+
+1. Enter Domain Name 
+2. Select Public Hosted Zone
+
+Insert image of hosted zone
+
+**(Optional) Updating NS Records **
+
+If your domain is not hosted on AWS, you will need to change the NS records of your domain at your registar(i.e. GoDaddy, Register.com, etc)
+
+insert image of ns records
+
+**Note: Changing NS records can take 60 seconds or up to 48 hours to propergate**
+
+### Create SSL Certificate
+
+1. Goto AWS Certificate Manager and select Request a certificate
+
+insert image of acm
+
+2. Select Request Public Certificate
+
+insert image of request certificate
+
+3. Under domains names enter your domain and wilcard domain (i.e. \*.helloworld)
+
+insert image of domain names
+
+4. Validation method, select DNS validation
+
+Insert image of validation method
+
+**Note: Validation can take up to 48 hours to complete**
+
+5. Key algorithm, select rsa 2048
+
+insert image of key algorithm
+
+6. After hitting request, select the certificate
+
+insert image
+
+7. Under domains, click on Create Records in Route 53
+
+insert image of create records
+
+## Configuring ALB to use HTTPS
+
+### Configure ALB to Forward Taffic From port 80 to 443
+
+1. Under listeners, click add listener
+2. Under protocol, select **HTTP**
+3. Under port, enter **80**
+4. Under Default actions, select **Forward**
+5. Under redirect, select **Itemized URL**
+6. For Protocol, select **HTTPS**
+7. For Port, enter **443**
+8. Set Status Code to **301 - Permantently Moved**
+
+insert image of configuration
+
+### Configure ALB SSL Traffic to Forward to Cruddur Target Group
+
+1. Under listeners, click add listener
+2. Under protocol, select **HTTPS**
+3. Under Default actions, select **Forward**
+4. Under Target Group, select **Cruddur-Frontend-React-JS**
+5. Under Security Policy, select TLS13
+6. Under Default SSL/TLS, select From ACM, and then select the domain certificate.
+
+### Configure Rule for Forward Traffic to Backend-flask
+
+1. Select HTTPS:443
+2. Under Action, select Manage Rule
+3. Select Insert Rule
+4. Under add condition, select **Host Header**
+5. Enter **api.yourdomainname**
+6. Under Then, select **Forward To**
+7. Under Target group, select **cruddur-backend-flask-tg**
+
+## Configure Route 53 to point to ALB
+
+### Configure A Record for naked domain
+
+1. Click on Create Record
+2. Under Record Name, enter your domain name
+3. Make Alias is enabled
+4. In the drop down, select **Alias to Application and Classic Load Balancer**
+5. Select the region your load balancer is located
+6. Select the Load Balancer you created
+7. Click Create records
+
+insert image
+
+### Configure A Record for naked domain
+
+1. Click on Create Record
+2. Under Record Name, enter api.yourdomainname
+3. Make Alias is enabled
+4. In the drop down, select **Alias to Application and Classic Load Balancer**
+5. Select the region your load balancer is located
+6. Select the Load Balancer you created
+7. Click Create records
+
+insert image
