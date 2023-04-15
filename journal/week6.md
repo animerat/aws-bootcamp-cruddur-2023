@@ -791,7 +791,7 @@ export ECR_FRONTEND_REACT_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazo
 echo $ECR_FRONTEND_REACT_URL
 ```
 
-### Create Freontend React JS push script at `/bin/frontend/push`
+### Create Freontend React JS push script at `/bin/frontend/push/frontend-react-js-prod`
 
 ```sh
 #! /usr/bin/bash
@@ -879,6 +879,33 @@ aws ecs execute-command  \
 --container $CONTAINER_NAME \
 --command "/bin/sh" \
 --interactive
+```
+
+### Create a Script to Deploy Frontend-React-JS at `/bin/frontend/deploy`
+```sh
+#! /usr/bin/bash
+
+CLUSTER_NAME="cruddur"
+SERVICE_NAME="frontend-react-js"
+TASK_DEFINTION_FAMILY="frontend-react-js"
+
+
+LATEST_TASK_DEFINITION_ARN=$(aws ecs describe-task-definition \
+--task-definition $TASK_DEFINTION_FAMILY \
+--query 'taskDefinition.taskDefinitionArn' \
+--output text)
+
+aws ecs update-service \
+--cluster $CLUSTER_NAME \
+--service $SERVICE_NAME \
+--task-definition $LATEST_TASK_DEFINITION_ARN \
+--force-new-deployment
+
+#aws ecs describe-services \
+#--cluster $CLUSTER_NAME \
+#--service $SERVICE_NAME \
+#--query 'services[0].deployments' \
+#--output table
 ```
 
 ## Setting up Custom Domain with SSL
@@ -989,3 +1016,917 @@ insert image
 7. Click Create records
 
 insert image
+
+
+## Securing Backend-Flask
+
+### Create a production dockerfile at `/backend-flask/Dockerfile.prod`
+
+```dockerfile
+FROM 623491699425.dkr.ecr.us-west-2.amazonaws.com/cruddur-python:3.10-slim-buster
+
+#For debuggging,
+
+#RUN apt-get update -y
+#RUN apt-get install iputils-ping -y
+
+#Set working directory to backend-flask inside container
+WORKDIR /backend-flask
+
+#Copy requirements.txt from current directory to container 
+COPY requirements.txt requirements.txt
+
+#Install flask and flask cor from Python package manager
+RUN pip3 install -r requirements.txt
+
+#Copies all file in current working directory to directory set by WORKDIR
+COPY . .
+
+#Set port for inter-container communication
+EXPOSE ${PORT}
+
+#Excutes a command 
+CMD [ "python3", "-m" , "flask", "run", "--host=0.0.0.0", "--port=4567", "--no-debug", "--no-debugger","--no-reload"]
+```
+
+### Create a backend-flask build script at `/bin/backend/build`
+
+```sh
+#! /usr/bin/bash
+ABS_PATH=$(readlink -f "$0")
+BACKEND_PATH=$(dirname $ABS_PATH)
+BIN_PATH=$(dirname $BACKEND_PATH)
+PROJECT_PATH=$(dirname $BIN_PATH)
+BACKEND_FLASK_PATH="$PROJECT_PATH/backend-flask"
+
+docker build \
+-f "$BACKEND_FLASK_PATH/Dockerfile.prod" \
+-t backend-flask-prod \
+"$BACKEND_FLASK_PATH/."
+```
+
+### Create a Docker Script to run with environment variables at `/bin/docker/backend-flask-prod`
+```dockerfile
+#! /usr/bin/bash
+docker run --rm \
+-p 4567:4567 \
+-e AWS_ENDPOINT_URL="http://dynamodb-local:8000" \
+-e CONNECTION_URL="postgresql://postgres:password@db:5432/cruddur" \
+-e FRONTEND_URL="https://3000-${GITPOD_WORKSPACE_ID}.${GITPOD_WORKSPACE_CLUSTER_HOST}" \
+-e BACKEND_URL="https://4567-${GITPOD_WORKSPACE_ID}.${GITPOD_WORKSPACE_CLUSTER_HOST}" \
+-e OTEL_SERVICE_NAME='backend-flask' \
+-e OTEL_EXPORTER_OTLP_ENDPOINT="https://api.honeycomb.io" \
+-e OTEL_EXPORTER_OTLP_HEADERS="x-honeycomb-team=${HONEYCOMB_API_KEY}" \
+-e AWS_XRAY_URL="*4567-${GITPOD_WORKSPACE_ID}.${GITPOD_WORKSPACE_CLUSTER_HOST}*" \
+-e AWS_XRAY_DAEMON_ADDRESS="xray-daemon:2000" \
+-e AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION}" \
+-e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+-e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+-e ROLLBAR_ACCESS_TOKEN="${ROLLBAR_ACCESS_TOKEN}" \
+-e AWS_COGNITO_USER_POOL_ID="${AWS_COGNITO_USER_POOL_ID}" \
+-e AWS_COGNITO_USER_POOL_CLIENT_ID="443loahoe2e9nvur8ptpil905f" \
+-it backend-flask-prod
+```
+
+### Create a Script to Push Backend-Flask to AWS at `/bin/backend/push`
+
+```sh
+#! /usr/bin/bash
+
+export ECR_BACKEND_FLASK_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/backend-flask"
+echo $ECR_BACKEND_FLASK_URL
+docker tag backend-flask-prod:latest $ECR_BACKEND_FLASK_URL:latest
+docker push $ECR_BACKEND_FLASK_URL:latest
+```
+
+### Create a Script to Deploy Backend-Flask at `/bin/backend/deploy`
+
+```sh
+#! /usr/bin/bash
+
+CLUSTER_NAME="cruddur"
+SERVICE_NAME="backend-flask"
+TASK_DEFINTION_FAMILY="backend-flask"
+
+
+LATEST_TASK_DEFINITION_ARN=$(aws ecs describe-task-definition \
+--task-definition $TASK_DEFINTION_FAMILY \
+--query 'taskDefinition.taskDefinitionArn' \
+--output text)
+
+aws ecs update-service \
+--cluster $CLUSTER_NAME \
+--service $SERVICE_NAME \
+--task-definition $LATEST_TASK_DEFINITION_ARN \
+--force-new-deployment
+
+#aws ecs describe-services \
+#--cluster $CLUSTER_NAME \
+#--service $SERVICE_NAME \
+#--query 'services[0].deployments' \
+#--output table
+```
+
+## Fix Messaging 
+
+### Missing a return statement under query_object_json function in `backend-flask/lib/db.py`
+
+```python
+def query_object_json(self,sql,params={}):
+
+    self.print_sql('json',sql,params)
+    self.print_params(params)
+    wrapped_sql = self.query_wrap_object(sql)
+
+    with self.pool.connection() as conn:
+      with conn.cursor() as cur:
+        cur.execute(wrapped_sql,params)
+        json = cur.fetchone()
+        if json == None:
+          return "{}"
+        else:
+          return json[0]
+          return json[0]
+```
+
+## Implement Refresh Cognito Token
+
+### Rebuilt `CheckAuth.js` library at `/frontend-react-js/src/lib/CheckAuth.js`
+
+```js
+import { Auth } from 'aws-amplify';
+
+export async function getAccessToken() {
+  Auth.currentSession()
+  .then((cognito_user_session) => {
+    const access_token = cognito_user_session.accessToken.jwtToken
+    localStorage.setItem("access_token", access_token)
+  })
+  .catch((err) => console.log(err));
+};
+
+export async function checkAuth (setUser) {
+    Auth.currentAuthenticatedUser({
+      // Optional, By default is false. 
+      // If set to true, this call will send a 
+      // request to Cognito to get the latest user data
+      bypassCache: false 
+    })
+    .then((cognito_user) => {
+      console.log('cognito_user',cognito_user);
+      setUser({
+        display_name: cognito_user.attributes.name,
+        handle: cognito_user.attributes.preferred_username
+      })
+      return Auth.currentSession()
+    }).then((cognito_user_session) => {
+        console.log('cognito_user_session',cognito_user_session);
+        localStorage.setItem("access_token", cognito_user_session.accessToken.jwtToken)
+    })
+    .catch((err) => console.log(err));
+  };
+```
+
+### Implement getAccessToken function from Checkauth library in `MessageForm.js`
+
+```js
+import './MessageForm.css';
+import React from "react";
+import process from 'process';
+import { json, useParams } from 'react-router-dom';
+import {getAccessToken} from '../lib/CheckAuth';
+
+export default function ActivityForm(props) {
+  const [count, setCount] = React.useState(0);
+  const [message, setMessage] = React.useState('');
+  const params = useParams();
+
+  const classes = []
+  classes.push('count')
+  if (1024-count < 0){
+    classes.push('err')
+  }
+
+  const onsubmit = async (event) => {
+    event.preventDefault();
+    try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/messages`
+      console.log('onsubmit payload', message)
+      let json = { 'message': message }
+      if (params.handle){
+        json.handle = params.handle
+      } else {
+        json.message_group_uuid = params.message_group_uuid
+      }
+      await getAccessToken()
+      const access_token = localStorage.getItem("access_token")
+      const res = await fetch(backend_url, {
+        method: "POST",
+        headers: {
+          'Authorization': `Bearer ${access_token}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(json)
+      });
+      let data = await res.json();
+      if (res.status === 200) {
+        console.log('data:',data)
+        if (data.message_group_uuid) {
+          console.log('redirect to message group')
+          window.location.href = `/messages/${data.message_group_uuid}`
+        } else {
+          props.setMessages(current => [...current,data]);
+        }
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  }
+
+  const textarea_onchange = (event) => {
+    setCount(event.target.value.length);
+    setMessage(event.target.value);
+  }
+
+  return (
+    <form 
+      className='message_form'
+      onSubmit={onsubmit}
+    >
+      <textarea
+        type="text"
+        placeholder="send a direct message..."
+        value={message}
+        onChange={textarea_onchange} 
+      />
+      <div className='submit'>
+        <div className={classes.join(' ')}>{1024-count}</div>
+        <button type='submit'>Message</button>
+      </div>
+    </form>
+  );
+}
+```
+
+### Implement getAccessToken and checkAuth function from Checkauth library in `HomeFeedPage.js`
+
+```js
+import './HomeFeedPage.css';
+import React from "react";
+
+import DesktopNavigation  from '../components/DesktopNavigation';
+import DesktopSidebar     from '../components/DesktopSidebar';
+import ActivityFeed from '../components/ActivityFeed';
+import ActivityForm from '../components/ActivityForm';
+import ReplyForm from '../components/ReplyForm';
+import {checkAuth,getAccessToken} from '../lib/CheckAuth';
+
+export default function HomeFeedPage() {
+  const [activities, setActivities] = React.useState([]);
+  const [popped, setPopped] = React.useState(false);
+  const [poppedReply, setPoppedReply] = React.useState(false);
+  const [replyActivity, setReplyActivity] = React.useState({});
+  const [user, setUser] = React.useState(null);
+  const dataFetchedRef = React.useRef(false);
+  
+  const loadData = async () => {
+    try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/activities/home`
+      await getAccessToken()
+      const access_token = localStorage.getItem("access_token")
+      const res = await fetch(backend_url, {
+        headers: {
+          Authorization: `Bearer ${access_token}`
+        },
+        method: "GET"
+      });
+      let resJson = await res.json();
+      if (res.status === 200) {
+        setActivities(resJson)
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  };
+  
+  React.useEffect(()=>{
+    //prevents double call
+    if (dataFetchedRef.current) return;
+    dataFetchedRef.current = true;
+
+    loadData();
+    checkAuth(setUser);
+  }, [])
+
+  return (
+    <article>
+      <DesktopNavigation user={user} active={'home'} setPopped={setPopped} />
+      <div className='content'>
+        <ActivityForm  
+          user_handle={user}
+          popped={popped}
+          setPopped={setPopped}
+          setActivities={setActivities}
+        />
+        <ReplyForm 
+          activity={replyActivity} 
+          popped={poppedReply} 
+          setPopped={setPoppedReply} 
+          setActivities={setActivities} 
+          activities={activities} 
+        />
+        <ActivityFeed 
+          title="Home" 
+          setReplyActivity={setReplyActivity} 
+          setPopped={setPoppedReply} 
+          activities={activities} 
+        />
+      </div>
+      <DesktopSidebar user={user} />
+    </article>
+  );
+}
+```
+
+### Implement getAccessToken and checkAuth function from Checkauth library in `MessageGroupNewPage.js`
+
+```js
+import './MessageGroupPage.css';
+import React from "react";
+import { useParams } from 'react-router-dom';
+
+import DesktopNavigation  from '../components/DesktopNavigation';
+import MessageGroupFeed from '../components/MessageGroupFeed';
+import MessagesFeed from '../components/MessageFeed';
+import MessagesForm from '../components/MessageForm';
+import {checkAuth, getAccessToken} from '../lib/CheckAuth';
+
+export default function MessageGroupPage() {
+  const [otherUser, setOtherUser] = React.useState([]);
+  const [messageGroups, setMessageGroups] = React.useState([]);
+  const [messages, setMessages] = React.useState([]);
+  const [popped, setPopped] = React.useState([]);
+  const [user, setUser] = React.useState(null);
+  const dataFetchedRef = React.useRef(false);
+  const params = useParams();
+
+  const loadUserShortData = async () => {
+    try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/users/@${params.handle}/short`
+      const res = await fetch(backend_url, {
+        method: "GET"
+      });
+      let resJson = await res.json();
+      if (res.status === 200) {
+        console.log('other user:',resJson)
+        setOtherUser(resJson)
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  };  
+
+  const loadMessageGroupsData = async () => {
+    try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/message_groups`
+      await getAccessToken()
+      const access_token = localStorage.getItem("access_token")
+      const res = await fetch(backend_url, {
+        headers: {
+          Authorization: `Bearer ${access_token}`
+        },
+        method: "GET"
+      });
+      let resJson = await res.json();
+      if (res.status === 200) {
+        setMessageGroups(resJson)
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  };  
+
+  React.useEffect(()=>{
+    //prevents double call
+    if (dataFetchedRef.current) return;
+    dataFetchedRef.current = true;
+
+    loadMessageGroupsData();
+    loadUserShortData();
+    checkAuth(setUser);
+  }, [])
+  return (
+    <article>
+      <DesktopNavigation user={user} active={'home'} setPopped={setPopped} />
+      <section className='message_groups'>
+        <MessageGroupFeed otherUser={otherUser} message_groups={messageGroups} />
+      </section>
+      <div className='content messages'>
+        <MessagesFeed messages={messages} />
+        <MessagesForm setMessages={setMessages} />
+      </div>
+    </article>
+  );
+}
+```
+
+### Implement getAccessToken and checkAuth function from Checkauth library in `MessageGroupPage.js `
+
+```js
+import './MessageGroupPage.css';
+import React from "react";
+import { useParams } from 'react-router-dom';
+
+import {checkAuth, getAccessToken} from '../lib/CheckAuth';
+import DesktopNavigation  from '../components/DesktopNavigation';
+import MessageGroupFeed from '../components/MessageGroupFeed';
+import MessagesFeed from '../components/MessageFeed';
+import MessagesForm from '../components/MessageForm';
+
+export default function MessageGroupPage() {
+  const [messageGroups, setMessageGroups] = React.useState([]);
+  const [messages, setMessages] = React.useState([]);
+  const [popped, setPopped] = React.useState([]);
+  const [user, setUser] = React.useState(null);
+  const dataFetchedRef = React.useRef(false);
+  const params = useParams();
+
+  const loadMessageGroupsData = async () => {
+    try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/message_groups`
+      await getAccessToken()
+      const access_token = localStorage.getItem("access_token")
+      const res = await fetch(backend_url, {
+        headers: {
+          Authorization: `Bearer ${access_token}`
+        },
+        method: "GET"
+      });
+      let resJson = await res.json();
+      if (res.status === 200) {
+        setMessageGroups(resJson)
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  };  
+
+  const loadMessageGroupData = async () => {
+    try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/messages/${params.message_group_uuid}`
+      await getAccessToken()
+      const access_token = localStorage.getItem("access_token")
+      const res = await fetch(backend_url, {headers: {
+        Authorization: `Bearer ${access_token}`
+      },
+        method: "GET"
+      });
+      let resJson = await res.json();
+      if (res.status === 200) {
+        setMessages(resJson)
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  };  
+
+  React.useEffect(()=>{
+    //prevents double call
+    if (dataFetchedRef.current) return;
+    dataFetchedRef.current = true;
+
+    loadMessageGroupsData();
+    loadMessageGroupData();
+    checkAuth(setUser);
+  }, [])
+  return (
+    <article>
+      <DesktopNavigation user={user} active={'home'} setPopped={setPopped} />
+      <section className='message_groups'>
+        <MessageGroupFeed message_groups={messageGroups} />
+      </section>
+      <div className='content messages'>
+        <MessagesFeed messages={messages} />
+        <MessagesForm setMessages={setMessages} />
+      </div>
+    </article>
+  );
+}
+```
+
+### Implement getAccessToken and checkAuth function from Checkauth library in `MessageGroupsPage.js `
+
+```js
+import './MessageGroupsPage.css';
+import React from "react";
+
+import DesktopNavigation  from '../components/DesktopNavigation';
+import MessageGroupFeed from '../components/MessageGroupFeed';
+import {checkAuth, getAccessToken} from '../lib/CheckAuth';
+
+export default function MessageGroupsPage() {
+  const [messageGroups, setMessageGroups] = React.useState([]);
+  const [popped, setPopped] = React.useState([]);
+  const [user, setUser] = React.useState(null);
+  const dataFetchedRef = React.useRef(false);
+
+  const loadData = async () => {
+    try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/message_groups`
+      await getAccessToken()
+      const access_token = localStorage.getItem("access_token")
+      const res = await fetch(backend_url, {
+        headers: {
+          Authorization: `Bearer ${access_token}`
+        },
+        method: "GET"
+      });
+      let resJson = await res.json();
+      if (res.status === 200) {
+        setMessageGroups(resJson)
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  };  
+
+  React.useEffect(()=>{
+    //prevents double call
+    if (dataFetchedRef.current) return;
+    dataFetchedRef.current = true;
+
+    loadData();
+    checkAuth(setUser);
+  }, [])
+  return (
+    <article>
+      <DesktopNavigation user={user} active={'home'} setPopped={setPopped} />
+      <section className='message_groups'>
+        <MessageGroupFeed message_groups={messageGroups} />
+      </section>
+      <div className='content'>
+      </div>
+    </article>
+  );
+}
+```
+
+## Configuring Container Insight
+
+### Enable X-Ray in Task Defintions
+
+Add the following code at `aws/task-definitions/backend-flask.json`
+
+```json
+ "containerDefinitions": [
+    {
+      "name": "xray",
+      "image": "public.ecr.aws/xray/aws-xray-daemon",
+      "essential": true,
+      "user": "1337",
+      "portMappings": [
+        {
+          "name": "xray",
+          "containerPort": 2000,
+          "protocol": "udp"
+        }
+      ]
+    },
+```
+
+## Generate ENV VARS for Frontend-React-js and Backend-Flask
+
+### Create Backend-Flask ENV VARS at `erb/backend-flask.env.erb`
+
+```ruby
+AWS_ENDPOINT_URL=http://dynamodb-local:8000
+CONNECTION_URL=postgresql://postgres:password@db:5432/cruddur
+FRONTEND_URL=https://3000-<%= ENV['GITPOD_WORKSPACE_ID'] %>.<%= ENV['GITPOD_WORKSPACE_CLUSTER_HOST'] %>
+BACKEND_URL=https://4567-<%= ENV['GITPOD_WORKSPACE_ID'] %>.<%= ENV['GITPOD_WORKSPACE_CLUSTER_HOST'] %>
+OTEL_SERVICE_NAME=backend-flask
+OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io
+OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=<%= ENV['HONEYCOMB_API_KEY'] %>
+AWS_XRAY_URL=*4567-<%= ENV['GITPOD_WORKSPACE_ID'] %>.<%= ENV['GITPOD_WORKSPACE_CLUSTER_HOST'] %>*
+AWS_XRAY_DAEMON_ADDRESS=xray-daemon:2000
+AWS_DEFAULT_REGION=<%= ENV['AWS_DEFAULT_REGION'] %>
+AWS_ACCESS_KEY_ID=<%= ENV['AWS_ACCESS_KEY_ID'] %>
+AWS_SECRET_ACCESS_KEY=<%= ENV['AWS_SECRET_ACCESS_KEY'] %>
+ROLLBAR_ACCESS_TOKEN=<%= ENV['ROLLBAR_ACCESS_TOKEN'] %>
+AWS_COGNITO_USER_POOL_ID=<%= ENV['AWS_COGNITO_USER_POOL_ID'] %>
+AWS_COGNITO_USER_POOL_CLIENT_ID=443loahoe2e9nvur8ptpil905f
+```
+
+### Create Script to Create Backend-flask ENV VARS file at `bin/backend/generate-env`
+```sh
+#!/usr/bin/env ruby
+
+require 'erb'
+
+template = File.read 'erb/backend-flask.env.erb'
+content = ERB.new(template).result(binding)
+filename = "backend-flask.env"
+File.write(filename, content)
+```
+
+### Create Script to RUN Backend-flask at `bin/backend/run`
+
+```sh
+#! /usr/bin/bash
+
+ABS_PATH=$(readlink -f "$0")
+BACKEND_PATH=$(dirname $ABS_PATH)
+BIN_PATH=$(dirname $BACKEND_PATH)
+PROJECT_PATH=$(dirname $BIN_PATH)
+ENVFILE_PATH="$PROJECT_PATH/backend-flask.env"
+
+docker run --rm \
+  --env-file $ENVFILE_PATH \
+  --network cruddur-net \
+  --publish 4567:4567 \
+  -it backend-flask-prod
+```
+
+### Create Frontend-React-js ENV VARS at `erb/frontend-react-js.env.erb`
+
+```ruby
+REACT_APP_BACKEND_URL=https://4567-<%= ENV['GITPOD_WORKSPACE_ID'] %>.<%= ENV['GITPOD_WORKSPACE_CLUSTER_HOST'] %>
+REACT_APP_AWS_PROJECT_REGION=<%= ENV['AWS_DEFAULT_REGION'] %>
+REACT_APP_AWS_COGNITO_REGION=<%= ENV['AWS_DEFAULT_REGION'] %>
+REACT_APP_AWS_USER_POOLS_ID=us-west-2_HGyBdb2c9
+REACT_APP_CLIENT_ID=443loahoe2e9nvur8ptpil905f
+```
+
+
+### Create Script to Create Frontend-React-js ENV VARS file at `bin/frontkend/generate-env`
+
+```ruby
+#!/usr/bin/env ruby
+
+require 'erb'
+
+template = File.read 'erb/frontend-react-js.env.erb'
+content = ERB.new(template).result(binding)
+filename = "frontend-react-js.env"
+File.write(filename, content)
+```
+
+### Create Script to RUN front-react-js at `bin/frontend/run`
+
+```sh
+#! /usr/bin/bash
+
+ABS_PATH=$(readlink -f "$0")
+FRONTEND_PATH=$(dirname $ABS_PATH)
+BIN_PATH=$(dirname $FRONTEND_PATH)
+PROJECT_PATH=$(dirname $BIN_PATH)
+ENVFILE_PATH="$PROJECT_PATH/frontend-react-js.env"
+
+docker run --rm \
+  --env-file $ENVFILE_PATH \
+  --network cruddur-net \
+  --publish 4567:4567 \
+  -it frontend-react-js-prod
+```
+
+### Modify dev-dockercompase.yml file to use backend.env and frontend.env file
+
+```dockerfile
+backend-flask:
+    container_name: backend_flask
+    env_file:
+      - backend-flask.env
+    
+frontend-react-js:
+    container_name: frontend_flask
+    env_file:
+      - frontend-react-js.env
+```
+
+## Configure Docker Network
+
+```dockerfile
+networks: 
+  cruddur-net:
+    driver: bridge
+    name: cruddur-net
+```
+
+## Fix Time
+
+> “People assume that time is a strict progression from cause to effect, but actually from a non-linear, non-subjective viewpoint, it’s more like a big ball of wibbly-wobbly, timey-wimey stuff.”
+
+### Create time Date Time library at `frontend-react-js/src/lib/DateTimeFormats.js`
+
+```js
+
+import { DateTime } from 'luxon';
+
+export function format_datetime(value) {
+  const datetime = DateTime.fromISO(value, { zone: 'utc' })
+  const local_datetime = datetime.setZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  return local_datetime.toLocaleString(DateTime.DATETIME_FULL)
+}
+
+export function message_time_ago(value){
+  console.log(value)
+  const datetime = DateTime.fromISO(value, { zone: 'utc' })
+  const created = datetime.setZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const now     = DateTime.now()
+  console.log('message_time_group',created,now)
+  const diff_mins = now.diff(created, 'minutes').toObject().minutes;
+  const diff_hours = now.diff(created, 'hours').toObject().hours;
+
+  if (diff_hours > 24.0){
+    return created.toFormat("LLL L");
+  } else if (diff_hours < 24.0 && diff_hours > 1.0) {
+    return `${Math.floor(diff_hours)}h`;
+  } else if (diff_hours < 1.0) {
+    return `${Math.round(diff_mins)}m`;
+  } else {
+    console.log('dd', diff_mins,diff_hours)
+    return 'unknown'
+  }
+}
+
+export function time_ago(value){
+  const datetime = DateTime.fromISO(value, { zone: 'utc' })
+  const future = datetime.setZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const now     = DateTime.now()
+  const diff_mins = now.diff(future, 'minutes').toObject().minutes;
+  const diff_hours = now.diff(future, 'hours').toObject().hours;
+  const diff_days = now.diff(future, 'days').toObject().days;
+
+  if (diff_hours > 24.0){
+    return `${Math.floor(diff_days)}d`;
+  } else if (diff_hours < 24.0 && diff_hours > 1.0) {
+    return `${Math.floor(diff_hours)}h`;
+  } else if (diff_hours < 1.0) {
+    return `${Math.round(diff_mins)}m`;
+  }
+}
+```
+
+### Remove UTC time from Create Message function from `backend-flask/lib/ddb.py`
+
+```python
+ def create_message(client,message_group_uuid, message, my_user_uuid, my_user_display_name, my_user_handle):
+    created_at = datetime.now().isoformat()
+    message_uuid = str(uuid.uuid4())
+```
+
+### Remote timezone.utc from `bin/ddb/seed`
+
+```python
+message_group_uuid = "5ae290ed-55d1-47a0-bc6d-fe2bc2700399"
+now = datetime.now()
+users = get_user_uuids()
+```
+
+```python
+  created_at = (now - timedelta(days=1) + timedelta(minutes=i))
+
+  create_message(
+    client=ddb,
+    message_group_uuid=message_group_uuid,
+    created_at=created_at.isoformat(),
+    message=message,
+    my_user_uuid=users[key]['uuid'],
+    my_user_display_name=users[key]['display_name'],
+    my_user_handle=users[key]['handle']
+  )
+```
+ 
+### Use the new date time library at `frontend-react-js/src/components/ActivityContent.js`
+
+```js
+import './ActivityContent.css';
+
+import { Link } from "react-router-dom";
+import { DateTime } from 'luxon';
+import {ReactComponent as BombIcon} from './svg/bomb.svg';
+import { format_datetime, time_ago } from '../lib/DateTimeFormats';
+
+export default function ActivityContent(props) {
+  let expires_at;
+  if (props.activity.expires_at) {
+    expires_at =  <div className="expires_at" title={format_datetime(props.activity.expires_at)}>
+                    <BombIcon className='icon' />
+                    <span className='ago'>{time_ago(props.activity.expires_at)}</span>
+                  </div>
+
+  }
+
+  return (
+    <div className='activity_content_wrap'>
+      <div className='activity_avatar'></div>
+      <div className='activity_content'>
+        <div className='activity_meta'>
+          <Link className='activity_identity' to={`/@`+props.activity.handle}>
+            <div className='display_name'>{props.activity.display_name}</div>
+            <div className="handle">@{props.activity.handle}</div>
+          </Link>{/* activity_identity */}
+          <div className='activity_times'>
+            <div className="created_at" title={format_datetime(props.activity.created_at)}>
+              <span className='ago'>{time_ago(props.activity.created_at)}</span> 
+            </div>
+            {expires_at}
+          </div>{/* activity_times */}
+        </div>{/* activity_meta */}
+        <div className="message">{props.activity.message}</div>
+      </div>{/* activity_content */}
+    </div>
+  );
+}
+```
+
+### Use the new date time library at `frontend-react-js/src/components/MessageGroupItem.js`
+ 
+```js
+import './MessageGroupItem.css';
+import { Link } from "react-router-dom";
+import { format_datetime, message_time_ago } from '../lib/DateTimeFormats';
+import { useParams } from 'react-router-dom';
+
+export default function MessageGroupItem(props) {
+  const params = useParams();
+
+  const classes = () => {
+    let classes = ["message_group_item"];
+    if (params.message_group_uuid == props.message_group.uuid){
+      classes.push('active')
+    }
+    return classes.join(' ');
+  }
+
+  return (
+    <Link className={classes()} to={`/messages/`+props.message_group.uuid}>
+      <div className='message_group_avatar'></div>
+      <div className='message_content'>
+        <div classsName='message_group_meta'>
+          <div className='message_group_identity'>
+            <div className='display_name'>{props.message_group.display_name}</div>
+            <div className="handle">@{props.message_group.handle}</div>
+          </div>{/* activity_identity */}
+        </div>{/* message_meta */}
+        <div className="message">{props.message_group.message}</div>
+        <div className="created_at" title={format_datetime(props.message_group.created_at)}>
+          <span className='ago'>{message_time_ago(props.message_group.created_at)}</span> 
+        </div>{/* created_at */}
+      </div>{/* message_content */}
+    </Link>
+  );
+}
+```
+
+### Use the new date time library at `frontend-react-js/src/components/MessageItem.js`
+ 
+```js
+import './MessageItem.css';
+import { Link } from "react-router-dom";
+import { format_datetime, message_time_ago } from '../lib/DateTimeFormats';
+
+export default function MessageItem(props) {
+  return (
+    <div className='message_item' >
+      <Link className='message_avatar' to={`/messages/@`+props.message.handle}></Link>
+      <div className='message_content'>
+        <div classsName='message_meta'>
+          <div className='message_identity'>
+            <div className='display_name'>{props.message.display_name}</div>
+            <div className="handle">@{props.message.handle}</div>
+          </div>{/* activity_identity */}
+        </div>{/* message_meta */}
+        <div className="message">{props.message.message}</div>
+        <div className="created_at" title={format_datetime(props.message.created_at)}>
+          <span className='ago'>{message_time_ago(props.message.created_at)}</span>
+        </div>{/* created_at */}
+      </div>{/* message_content */}
+    </div>
+  );
+}
+```
+
+### Add Message Item Avatar at `frontend-react-js/src/components/MessageItem.css`
+
+```css
+
+.message_item .avatar {
+  cursor: pointer;
+  text-decoration: none;
+}
+```
