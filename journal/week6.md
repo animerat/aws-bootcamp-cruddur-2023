@@ -1727,8 +1727,7 @@ networks:
 ```
 
 ## Fix Time
-
-> “People assume that time is a strict progression from cause to effect, but actually from a non-linear, non-subjective viewpoint, it’s more like a big ball of wibbly-wobbly, timey-wimey stuff.”
+![Image of Billing Alarm](assests/time.jpg)
 
 ### Create time Date Time library at `frontend-react-js/src/lib/DateTimeFormats.js`
 
