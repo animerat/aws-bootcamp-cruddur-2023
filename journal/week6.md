@@ -585,7 +585,7 @@ aws ecs execute-command  \
 
 ### Modify the default sercurity group to allow container to access Postgres Database
 
-Add image
+![Image of ECS_Security Group](assests/6_Week_ECS_SG.png)
 
 ## Configure Application Load Balancer
 
@@ -593,23 +593,26 @@ Add image
 
 Create a security group called cruddur-alb-sg with the following rules:
 
-add security group image
+![Image of ECS_ALB_SGS](assests/6_Week_ECS_ALB_SGS.png)
 
-Add the cruddur-alb-sg to the crud-srv-sg
+![Image of ECS ALB SG](assests/6_Week_ECS_ALB_SG.png)
 
 ### Create Target Group Called Cruddur-Backend-Flask-TG
 
-add backend flask tg
-
+![Image of Backend Flask TG](assests/6_Week_Backend-Flask-TG.png)
 
 ### Create Target Group called cruddur-Frontend-react-js
 
-
-add frontend-react-js 
+![Image of Frontend React JS TG](assests/6_Week_Frontend_React-TG.png)
 
 ### Create Application load balancer
 
-add alb images 3x
+![Image of Frontend React JS TG](assests/6_Week_ALB_Part1.png)
+
+![Image of Frontend React JS TG](assests/6_Week_ALB_Part2.png)
+
+![Image of Frontend React JS TG](assests/6_Week_ALB_Part3.png)
+
 
 Once done get the arn of the alb and add to `service-backend-flask.json`
 
@@ -915,13 +918,13 @@ aws ecs update-service \
 1. Enter Domain Name 
 2. Select Public Hosted Zone
 
-Insert image of hosted zone
+![Image of Create Hosted Zone](assests/6_Week_Create_Hosted_Zone.png)
 
 **(Optional) Updating NS Records **
 
 If your domain is not hosted on AWS, you will need to change the NS records of your domain at your registar(i.e. GoDaddy, Register.com, etc)
 
-insert image of ns records
+![Image of Create Hosted Zone](assests/6_Week_Route53_NS_Records.png)
 
 **Note: Changing NS records can take 60 seconds or up to 48 hours to propergate**
 
@@ -929,33 +932,33 @@ insert image of ns records
 
 1. Goto AWS Certificate Manager and select Request a certificate
 
-insert image of acm
+![Image of Billing Alarm](assests/6_Week_ACM.png)
 
 2. Select Request Public Certificate
 
-insert image of request certificate
+![Image of Billing Alarm](assests/6_Week_ACM_Request_Cert.png)
 
 3. Under domains names enter your domain and wilcard domain (i.e. \*.helloworld)
 
-insert image of domain names
+![Image of Billing Alarm](assests/6_Week_ACM_Request_Cert_1.png)
 
 4. Validation method, select DNS validation
 
-Insert image of validation method
+![Image of Billing Alarm](assests/6_Week_ACM_Request_Cert_Validation_Method.png)
 
 **Note: Validation can take up to 48 hours to complete**
 
 5. Key algorithm, select rsa 2048
 
-insert image of key algorithm
+![Image of Billing Alarm](assests/6_Week_ACM_Request_Cert_Validation_Method.png)
 
 6. After hitting request, select the certificate
 
-insert image
+![Image of Billing Alarm](assests/6_Week_ACM_Request_Cert_Key_Algorithm.png)
 
 7. Under domains, click on Create Records in Route 53
 
-insert image of create records
+![Image of Billing Alarm](assests/6_Week_ACM_Create%20Records%20in%20route%2053.png)
 
 ## Configuring ALB to use HTTPS
 
@@ -970,16 +973,25 @@ insert image of create records
 7. For Port, enter **443**
 8. Set Status Code to **301 - Permantently Moved**
 
-insert image of configuration
+![Image of 6 Week ALB Listener 80](assests/6_Week_ALB_Listerner_80.png)
 
 ### Configure ALB SSL Traffic to Forward to Cruddur Target Group
 
 1. Under listeners, click add listener
 2. Under protocol, select **HTTPS**
+
+![Image of 6 Week ALB Listener 443](assests/6_Week_ALB_Listerner_443.png)
+
 3. Under Default actions, select **Forward**
 4. Under Target Group, select **Cruddur-Frontend-React-JS**
+
+![Image of 6 Week ALB Listener 443](assests/6_Week_ALB_Listerner_443_forward_tg.png)
+
 5. Under Security Policy, select TLS13
 6. Under Default SSL/TLS, select From ACM, and then select the domain certificate.
+
+![Image of 6 Week ALB Listener 443](assests/6_Week_ALB_Listerner_acmpng.png)
+
 
 ### Configure Rule for Forward Traffic to Backend-flask
 
@@ -990,6 +1002,9 @@ insert image of configuration
 5. Enter **api.yourdomainname**
 6. Under Then, select **Forward To**
 7. Under Target group, select **cruddur-backend-flask-tg**
+
+
+![Image of 6 Week ALB Listener 443](assests/6_Week_ALB_Forward_Rule_443.png)
 
 ## Configure Route 53 to point to ALB
 
@@ -1003,9 +1018,9 @@ insert image of configuration
 6. Select the Load Balancer you created
 7. Click Create records
 
-insert image
+![Image of 6 Week Route53 Naked Domain](assests/6_Week_Route53_Naked_Domain.png)
 
-### Configure A Record for naked domain
+### Configure A Record for API domain
 
 1. Click on Create Record
 2. Under Record Name, enter api.yourdomainname
@@ -1015,7 +1030,7 @@ insert image
 6. Select the Load Balancer you created
 7. Click Create records
 
-insert image
+![Image of 6 Week Route53 API A record](assests/6_Week_Route53_API.png)
 
 
 ## Securing Backend-Flask
