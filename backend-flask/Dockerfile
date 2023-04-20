@@ -15,5 +15,7 @@ COPY . .
 #Set port for inter-container communication
 EXPOSE ${PORT}
 
+ENV PYTHONUNBUFFERED=1
+
 #Excutes a command 
 CMD [ "python3", "-m" , "flask", "run", "--host=0.0.0.0", "--port=4567", "--debug"]
