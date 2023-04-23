@@ -17,7 +17,6 @@ from services.create_message import *
 from services.show_activity import *
 from services.update_profile import *
 
-
 from lib.cognito_jwt_token import CognitoJwtToken, extract_access_token, TokenVerifyError
 
 # Honeycomb -- import opentelemetry python packages
@@ -301,7 +300,7 @@ def data_update_profile():
   try:
     claims = cognito_jwt_token.verify(access_token)
     cognito_user_id = claims['sub']
-    UpdateProfile.run(
+    model = UpdateProfile.run(
       cognito_user_id=cognito_user_id,
       bio=bio,
       display_name=display_name
