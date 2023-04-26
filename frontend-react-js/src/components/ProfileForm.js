@@ -14,7 +14,8 @@ export default function ProfileForm(props) {
     setDisplayName(props.profile.display_name);
   }, [props.profile])
 
-  const s3uploadkey = async(event)=> {
+
+  const s3uploadkey = async (event)=> {
     try {
       console.log('s3upload')
       const backend_url = "https://q8rb8x0fv6.execute-api.us-west-2.amazonaws.com/avatars/key_upload"
@@ -23,7 +24,7 @@ export default function ProfileForm(props) {
       const res = await fetch(backend_url, {
         method: "POST",
         headers: {
-          'Origin': "https://3000-animerat-awsbootcampcru-3e6ccnht2om.ws-us95.gitpod.io",
+          'Origin': "https://3000-animerat-awsbootcampcru-5j16kxzy4mn.ws-us95.gitpod.io",
           'Authorization': `Bearer ${access_token}`,
           'Accept': 'application/json',
           'Content-Type': 'application/json'
@@ -53,7 +54,8 @@ export default function ProfileForm(props) {
 
     try {
       console.log('s3upload')
-      const res = await fetch(presignedurl, {
+      const backend_url = ""
+      const res = await fetch(backend_url, {
         method: "PUT",
         body: file,
         headers: {
