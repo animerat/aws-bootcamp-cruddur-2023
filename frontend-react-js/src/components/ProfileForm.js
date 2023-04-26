@@ -17,7 +17,7 @@ export default function ProfileForm(props) {
   const s3uploadkey = async(event)=> {
     try {
       console.log('s3upload')
-      const backend_url = "https://hhcm9m1mwf.execute-api.us-west-2.amazonaws.com/avatars/key_upload"
+      const backend_url = "https://q8rb8x0fv6.execute-api.us-west-2.amazonaws.com/avatars/key_upload"
       await getAccessToken()
       const access_token = localStorage.getItem("access_token")
       const res = await fetch(backend_url, {
@@ -131,6 +131,9 @@ export default function ProfileForm(props) {
             </div>
           </div>
           <div className="popup_content">
+            <div className="upload" onClick={s3uploadkey}>
+              Upload Avatar
+            </div>
           <input type="file" name="avatarupload" onChange={s3upload} />
            
             <div className="field display_name">
