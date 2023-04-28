@@ -2,7 +2,7 @@ import './ProfileForm.css';
 import React from "react";
 import process from 'process';
 import {getAccessToken} from 'lib/CheckAuth';
-import { upload } from '@testing-library/user-event/dist/upload';
+
 
 export default function ProfileForm(props) {
   const [bio, setBio] = React.useState(0);
@@ -14,7 +14,6 @@ export default function ProfileForm(props) {
     setDisplayName(props.profile.display_name);
   }, [props.profile])
 
-
   const s3uploadkey = async (event)=> {
     try {
       console.log('s3upload')
@@ -24,7 +23,7 @@ export default function ProfileForm(props) {
       const res = await fetch(backend_url, {
         method: "POST",
         headers: {
-          'Origin': "https://3000-animerat-awsbootcampcru-50p5dlqh9dt.ws-us96b.gitpod.io",
+          'Origin': "https://*.gitpod.io",
           'Authorization': `Bearer ${access_token}`,
           'Accept': 'application/json',
           'Content-Type': 'application/json'
@@ -51,11 +50,9 @@ export default function ProfileForm(props) {
     console.log(filename,size,type)
     const presignedurl = await s3uploadkey()
     console.log('pp',presignedurl)
-
     try {
       console.log('s3upload')
-      const backend_url = ""
-      const res = await fetch(backend_url, {
+      const res = await fetch(presignedurl, {
         method: "PUT",
         body: file,
         headers: {
@@ -133,9 +130,7 @@ export default function ProfileForm(props) {
             </div>
           </div>
           <div className="popup_content">
-            <div className="upload" onClick={s3uploadkey}>
-              Upload Avatar
-            </div>
+            
           <input type="file" name="avatarupload" onChange={s3upload} />
            
             <div className="field display_name">
