@@ -10,7 +10,7 @@ def handler(event:, context:)
     { 
       headers: {
         "Access-Control-Allow-Headers": "*, Authorization",
-        "Access-Control-Allow-Origin": "https://3000-animerat-awsbootcampcru-50p5dlqh9dt.ws-us96b.gitpod.io",
+        "Access-Control-Allow-Origin": "https://*.gitpod.io",
         "Access-Control-Allow-Methods": "OPTIONS,GET,POST"
       },
       statusCode: 200
@@ -38,7 +38,7 @@ def handler(event:, context:)
     { 
       headers: {
         "Access-Control-Allow-Headers": "*, Authorization",
-        "Access-Control-Allow-Origin": "https://3000-animerat-awsbootcampcru-50p5dlqh9dt.ws-us96b.gitpod.io",
+        "Access-Control-Allow-Origin": "*.gitpod.io",
         "Access-Control-Allow-Methods": "OPTIONS,GET,POST"
       },
       statusCode: 200, 
@@ -47,7 +47,3 @@ def handler(event:, context:)
   
   end # if 
 end # def handler
-puts handler(
-  event: {},
-  context: {}
-)
