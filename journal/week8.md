@@ -406,3 +406,320 @@ module.exports = {
 ![Image of 8 Week S3CF_Bucket_Policy](assests/8_Week_S3CF_BucketPolicy.png)
 9) Click on Save Changes
 
+## Implementing Users Profile Page
+
+### Create a `bootstrap` file under `/bin` 
+This file creates frontend.env and backend.env files.  This also logs into AWS ECR.
+
+```shell
+#! /usr/bin/bash
+set -e # stop if it fails at any point
+
+CYAN='\033[1;36m'
+NO_COLOR='\033[0m'
+LABEL="bootstrap"
+printf "${CYAN}====== ${LABEL}${NO_COLOR}\n"
+
+ABS_PATH=$(readlink -f "$0")
+BIN_DIR=$(dirname $ABS_PATH)
+
+source "$BIN_DIR/ecr/login"
+ruby "$BIN_DIR/backend/generate-env"
+ruby "$BIN_DIR/frontend/generate-env"
+```
+
+### Create a file called `show.sql` under `backend-flask\db\sql\users`
+This file will show the latest cruds by the user.
+```sql
+SELECT
+  (SELECT COALESCE(row_to_json(object_row),'{}'::json) FROM (
+    SELECT
+      users.uuid,
+      users.cognito_user_id as cognito_user_uuid,
+      users.handle,
+      users.display_name,
+      users.bio,
+      (
+        SELECT 
+        count(true) 
+       FROM public.activities
+       WHERE
+        activities.user_uuid = users.uuid
+       ) as cruds_count
+  ) object_row) as profile,
+  (SELECT COALESCE(array_to_json(array_agg(row_to_json(array_row))),'[]'::json) FROM (
+    SELECT
+      activities.uuid,
+      users.display_name,
+      users.handle,
+      activities.message,
+      activities.created_at,
+      activities.expires_at
+    FROM public.activities
+    WHERE
+      activities.user_uuid = users.uuid
+    ORDER BY activities.created_at DESC 
+    LIMIT 40
+  ) array_row) as activities
+FROM public.users
+WHERE
+  users.handle = %(handle)s
+```
+
+### Modify `user_activities.py` under `backend-flask\services\`
+Replace the hardcoded user value with the following code to show user activities outside of the hard coded user.
+
+```py
+from lib.db import db
+
+if user_handle == None or len(user_handle) < 1:
+      model['errors'] = ['blank_user_handle']
+    else:
+      sql = db.template('users','show')
+      results = db.query_object_json(sql,{'handle': user_handle})
+      model['data'] = results
+```
+
+### Modify `userfeedpage.js` under `\frontend-react-js\src\pages`
+
+```js
+import './UserFeedPage.css';
+import React from "react";
+import { useParams } from 'react-router-dom';
+
+import DesktopNavigation  from '../components/DesktopNavigation';
+import DesktopSidebar     from '../components/DesktopSidebar';
+import ActivityFeed from '../components/ActivityFeed';
+import ActivityForm from '../components/ActivityForm';
+import ProfileHeading from '../components/ProfileHeading';
+import ProfileForm from '../components/ProfileForm';
+
+import {checkAuth,getAccessToken} from '../lib/CheckAuth';
+
+export default function UserFeedPage() {
+  const [activities, setActivities] = React.useState([]);
+  const [profile, setProfile] = React.useState([]);
+  const [popped, setPopped] = React.useState([]);
+  const [poppedProfile, setPoppedProfile] = React.useState([]);
+  const [user, setUser] = React.useState(null);
+  const dataFetchedRef = React.useRef(false);
+
+  const params = useParams();
+
+  const loadData = async () => {
+    try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/activities/@${params.handle}`
+      await getAccessToken()
+      const access_token = localStorage.getItem("access_token")
+      const res = await fetch(backend_url, {
+        headers: {
+          Authorization: `Bearer ${access_token}`
+        },
+        method: "GET"
+      });
+      let resJson = await res.json();
+      if (res.status === 200) {
+        setProfile(resJson.profile)
+        setActivities(resJson.activities)
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  };
+
+  React.useEffect(()=>{
+    //prevents double call
+    if (dataFetchedRef.current) return;
+    dataFetchedRef.current = true;
+
+    loadData();
+    checkAuth(setUser);
+  }, [])
+
+  return (
+    <article>
+      <DesktopNavigation user={user} active={'profile'} setPopped={setPopped} />
+      <div className='content'>
+        <ActivityForm popped={popped} setActivities={setActivities} />
+        <ProfileForm 
+          profile={profile}
+          popped={poppedProfile} 
+          setPopped={setPoppedProfile} 
+        />        
+        <div className='activity_feed'>
+          <ProfileHeading setPopped={setPoppedProfile} profile={profile} />
+          <ActivityFeed activities={activities} />
+        </div>
+      </div>
+      <DesktopSidebar user={user} />
+    </article>
+  );
+}
+```
+
+### Add Edit Profile button
+
+####Create a file called `EditProfileButton.js` under `frontend-react-js\src\componenets`
+
+```js
+import './EditProfileButton.css';
+
+export default function EditProfileButton(props) {
+  const pop_profile_form = (event) => {
+    event.preventDefault();
+    props.setPopped(true);
+    return false;
+  }
+
+  return (
+    <button onClick={pop_profile_form} className='profile-edit-button' href="#">Edit Profile</button>
+  );
+}
+```
+
+####Create a file called  `EditProfileButton.css` under ``frontend-react-js\src\componenets`
+
+```css
+.profile-edit-button {
+    border: solid 1px rgba(255,255,255,0.5);
+    padding: 12px 20px;
+    font-size: 18px;
+    background: none;
+    border-radius: 999px;
+    color: rgba(255,255,255,0.8);
+    cursor: pointer;
+  }
+  
+  .profile-edit-button:hover {
+    background: rgba(255,255,255,0.3)
+  }
+```
+### Refactor `ActivityFeed.js` under `frontend-react-js\src\components`
+
+```js
+import './ActivityFeed.css';
+import ActivityItem from './ActivityItem';
+
+export default function ActivityFeed(props) {
+  return (
+    <div className='activity_feed_collection'>
+      {props.activities.map(activity => {
+      return  <ActivityItem setReplyActivity={props.setReplyActivity} setPopped={props.setPopped} key={activity.uuid} activity={activity} />
+      })}
+    </div>
+  );
+}
+```
+
+### Refactor Activity Feed Section in `HomeFeedPage.js` under `frontend-react-js\src\pages` to include modfications done to the `UserFeedPage.js`
+
+```js
+        <div className='activity_feed'>
+          <div className='activity_feed_heading'>
+            <div className='title'>Home</div>
+          </div>
+          <ActivityFeed 
+            setReplyActivity={setReplyActivity} 
+            setPopped={setPoppedReply} 
+            activities={activities} 
+          />
+        </div>
+```
+### Refactor Activity Feed Section in `NotificationFeedPage.js` under `frontend-react-js\src\pages` to include modfications done to the `UserFeedPage.js`
+
+```js
+        <div className='activity_feed'>
+          <div className='activity_feed_heading'>
+            <div className='title'>Notifications</div>
+          </div>
+          <ActivityFeed 
+            setReplyActivity={setReplyActivity} 
+            setPopped={setPoppedReply} 
+            activities={activities} 
+          />
+        </div>
+```
+
+### Create `ProfileHeading.js` under `frontend-react-js/src/components`
+```js
+import './ProfileHeading.css';
+import EditProfileButton from '../components/EditProfileButton';
+
+export default function ProfileHeading(props) {
+  const backgroundImage = 'url("https://assests.helloeworld.io/banners/banner.jpg")';
+  const styles = {
+    backgroundImage: backgroundImage,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+  };
+  return (
+  <div className='activity_feed_heading profile_heading'>
+    <div className='title'>{props.profile.display_name}</div>
+    <div className="cruds_count">{props.profile.cruds_count} Cruds</div>
+    <div className="banner" style={styles} >
+      <div className="avatar">
+        <img src="https://assests.helloeworld.io/avatars/time.jpg"></img>
+      </div>
+    </div>
+    <div className="info">
+      <div className='id'>
+        <div className="display_name">{props.profile.display_name}</div>
+        <div className="handle">@{props.profile.handle}</div>
+      </div>
+      <EditProfileButton setPopped={props.setPopped} />
+    </div>
+    <div className="bio" >{props.profile.bio}</div>
+
+  </div>
+  );
+}
+```
+
+### Create `ProfileHeading.css` under `frontend-react-js/src/components`
+```css
+.profile_heading {
+    padding-bottom: 0px;
+  }
+  .profile_heading .avatar {
+    position: absolute;
+    bottom:-74px;
+    left: 16px;
+  }
+  .profile_heading .avatar img {
+    width: 148px;
+    height: 148px;
+    border-radius: 999px;
+    border: solid 8px var(--fg);
+  }
+  
+  .profile_heading .banner {
+    position: relative;
+    height: 200px;
+  }
+  
+  .profile_heading .info {
+    display: flex;
+    flex-direction: row;
+    align-items: start;
+    padding: 16px;
+  }
+  
+  .profile_heading .info .id {
+    padding-top: 70px;
+    flex-grow: 1;
+  }
+  
+  .profile_heading .info .id .display_name {
+    font-size: 24px;
+    font-weight: bold;
+    color: rgb(255,255,255);
+  }
+  .profile_heading .info .id .handle {
+    font-size: 16px;
+    color: rgba(255,255,255,0.7);
+  }
+  ```
+  
+  
