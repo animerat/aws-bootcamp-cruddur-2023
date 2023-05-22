@@ -720,6 +720,772 @@ export default function ProfileHeading(props) {
     font-size: 16px;
     color: rgba(255,255,255,0.7);
   }
-  ```
+```
   
+## Implementing MIgrations Backend Endpoint and Profile Form
+
+### Create a `prepare` file under `/bin` 
+This file will prepare the database after launching the application thru docker.
+```shell
+#! /usr/bin/bash
+set -e # stop if it fails at any point
+
+CYAN='\033[1;36m'
+NO_COLOR='\033[0m'
+LABEL="bootstrap"
+printf "${CYAN}====== ${LABEL}${NO_COLOR}\n"
+
+ABS_PATH=$(readlink -f "$0")
+BIN_PATH=$(dirname $ABS_PATH)
+DB_PATH="$BIN_PATH/db"
+DDB_PATH="$BIN_PATH/ddb"
+echo "====$"
+echo $DB_PATH
+echo "====$"
+
+source "$DB_PATH/db-create"
+source "$DB_PATH/db-schema-load"
+source "$DB_PATH/db-seed"
+python "$DB_PATH/db-update_cognito_user_ids"
+python "$DDB_PATH/schema-load"
+python "$DDB_PATH/seed"
+```
+
+### Create a file called `jsconfig.json` at `frontend-react-js`
+
+This file will set the explicit includes so that anything in the source directory will be allow to reference it at the root level.
+```json
+{
+  "compilerOptions": {
+    "baseUrl": "src"
+  },
+  "include": ["src"]
+}
+```
+
+### Import the Edit Profile Button code into `UserFeedPage.js`
+
+```js
+
+import ProfileHeading from '../components/ProfileHeading';
+import ProfileForm from '../components/ProfileForm';
+
+  <div className='content'>
+        <ActivityForm popped={popped} setActivities={setActivities} />
+        <ProfileForm 
+          profile={profile}
+          popped={poppedProfile} 
+          setPopped={setPoppedProfile} 
+        />
+```
+
+### Create a file called `ProfileForm.js` under `frontend-react-js/src/components/`
+
+```js
+import './ProfileForm.css';
+import React from "react";
+import process from 'process';
+import {getAccessToken} from 'lib/CheckAuth';
+
+
+export default function ProfileForm(props) {
+  const [bio, setBio] = React.useState('');
+  const [displayName, setDisplayName] = React.useState('');
+
+  React.useEffect(()=>{
+    setBio(props.profile.bio || '');
+    setDisplayName(props.profile.display_name);
+  }, [props.profile])
+
+  const s3uploadkey = async (extension)=> {
+    console.log('ext',extension)
+    try {
+      const gateway_url = `${process.env.REACT_APP_API_GATEWAY_ENDPOINT_URL}/avatars/key_upload`
+      await getAccessToken()
+      const access_token = localStorage.getItem("access_token")
+      const json = {
+        extension: extension
+      }
+      const res = await fetch(gateway_url, {
+        method: "POST",
+        body: JSON.stringify(json),
+        headers: {
+          'Origin': process.env.REACT_APP_FRONTEND_URL,
+          'Authorization': `Bearer ${access_token}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      })
+      let data = await res.json();
+      if (res.status === 200) {
+        return data.url
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  }
+  const s3upload = async (event)=> {
+    console.log('event',event)
+    const file = event.target.files[0]
+    const filename = file.name
+    const size = file.size
+    const type = file.type
+    const preview_image_url = URL.createObjectURL(file)
+    console.log(filename,size,type)
+    const fileparts = filename.split('.')
+    const extension = fileparts[fileparts.length-1]
+    const presignedurl = await s3uploadkey(extension)
+    try {
+      console.log('s3upload')
+      const res = await fetch(presignedurl, {
+        method: "PUT",
+        body: file,
+        headers: {
+          'Content-Type': type
+      }})
+      if (res.status === 200) {
+        
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  }
+  const onsubmit = async (event) => {
+    event.preventDefault();
+    try {
+      const backend_url = `${process.env.REACT_APP_BACKEND_URL}/api/profile/update`
+      await getAccessToken()
+      const access_token = localStorage.getItem("access_token")
+      const res = await fetch(backend_url, {
+        method: "POST",
+        headers: {
+          'Authorization': `Bearer ${access_token}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          bio: bio,
+          display_name: displayName
+        }),
+      });
+      let data = await res.json();
+      if (res.status === 200) {
+        setBio(null)
+        setDisplayName(null)
+        props.setPopped(false)
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  }
+
+  const bio_onchange = (event) => {
+    setBio(event.target.value);
+  }
+
+  const display_name_onchange = (event) => {
+    setDisplayName(event.target.value);
+  }
+
+  const close = (event)=> {
+    if (event.target.classList.contains("profile_popup")) {
+      props.setPopped(false)
+    }
+  }
+
+  if (props.popped === true) {
+    return (
+      <div className="popup_form_wrap profile_popup" onClick={close}>
+        <form 
+          className='profile_form popup_form'
+          onSubmit={onsubmit}
+        >
+          <div className="popup_heading">
+            <div className="popup_title">Edit Profile</div>
+            <div className='submit'>
+              <button type='submit'>Save</button>
+            </div>
+          </div>
+          <div className="popup_content">
+            
+          <input type="file" name="avatarupload" onChange={s3upload} />
+           
+            <div className="field display_name">
+              <label>Display Name</label>
+              <input
+                type="text"
+                placeholder="Display Name"
+                value={displayName}
+                onChange={display_name_onchange} 
+              />
+            </div>
+            <div className="field bio">
+              <label>Bio</label>
+              <textarea
+                placeholder="Bio"
+                value={bio}
+                onChange={bio_onchange} 
+              />
+            </div>
+          </div>
+        </form>
+      </div>
+    );
+  }
+}
+```
+
+### Create a file called `ProfileForm.css` under `frontend-react-js/src/components/`
+
+```css
+.profile_popup .upload {
+  color: white;
+  background: green;
+}
+
+form.profile_form input[type='text'],
+form.profile_form textarea {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  border-radius: 4px;
+  border: none;
+  outline: none;
+  display: block;
+  outline: none;
+  resize: none;
+  width: 100%;
+  padding: 16px;
+  border: solid 1px var(--field-border);
+  background: var(--field-bg);
+  color: #fff;
+}
+
+.profile_popup .popup_content {
+  padding: 16px;
+}
+
+form.profile_form .field.display_name {
+  margin-bottom: 24px;
+}
+
+form.profile_form label {
+  color: rgba(255,255,255,0.8);
+  padding-bottom: 4px;
+  display: block;
+}
+
+form.profile_form textarea {
+  height: 140px;
+}
+
+form.profile_form input[type='text']:hover,
+form.profile_form textarea:focus {
+  border: solid 1px var(--field-border-focus)
+}
+
+.profile_popup button[type='submit'] {
+  font-weight: 800;
+  outline: none;
+  border: none;
+  border-radius: 4px;
+  padding: 10px 20px;
+  font-size: 16px;
+  background: rgba(149,0,255,1);
+  color: #fff;
+}
+```
+
+### Create a file called `Popup.css` under `frontend-react-js/src/components/`
+```
+.popup_form_wrap {
+    z-index: 100;
+    position: fixed;
+    height: 100%;
+    width: 100%;
+    top: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+    padding-top: 48px;
+    background: rgba(255,255,255,0.1)
+  }
   
+  .popup_form {
+    background: #000;
+    box-shadow: 0px 0px 6px rgba(190, 9, 190, 0.6);
+    border-radius: 16px;
+    width: 600px;
+  }
+  
+  .popup_form .popup_heading {
+    display: flex;
+    flex-direction: row;
+    border-bottom: solid 1px rgba(255,255,255,0.4);
+    padding: 16px;
+  }
+  
+  .popup_form .popup_heading .popup_title{
+    flex-grow: 1;
+    color: rgb(255,255,255);
+    font-size: 18px;
+  
+  }
+```
+
+### Import the `Popup.css` component into `frontend-react-js/src/App.js`
+
+```
+import './components/Popup.css';
+```
+
+### Refactor `Reployform.css` under `front-end-react-js\src\components`
+
+```css
+form.replies_form {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.activity_wrap {
+  padding: 16px;
+}
+
+form.replies_form textarea {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 16px;
+  border-radius: 4px;
+  border: none;
+  outline: none;
+  display: block;
+  outline: none;
+  resize: none;
+  width: 100%;
+  height: 140px;
+  padding: 16px;
+  border: solid 1px rgba(149,0,255,0.1);
+  background: rgba(149,0,255,0.1);
+  color: #fff;
+}
+
+form.replies_form textarea:focus {
+  border: solid 1px rgb(149,0,255,1);
+}
+
+form.replies_form .submit {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 12px;
+  font-weight: 600;
+}
+
+form.replies_form button[type='submit'] {
+  font-weight: 800;
+  outline: none;
+  border: none;
+  border-radius: 4px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  height: 38px;
+  padding: 10px 20px;
+  font-size: 16px;
+  margin-left: 12px;
+  background: rgba(149,0,255,1);
+  color: #fff;
+}
+
+form.replies_form .count {
+  color: rgba(255,255,255,0.3)
+}
+
+form.replies_form .count.err {
+  color: rgb(255, 0, 0)
+}
+
+form.replies_form .expires_at_field {
+  display: flex;
+  gap: 12px;
+  position: relative;
+  border-left: solid 1px rgba(149,0,255,0.7);
+}
+
+form.replies_form .expires_at_field .icon {
+  position: absolute;
+  top: 12px;
+  left: 8px;
+  fill: #fff;
+  width: 14px;
+  height: 14px;
+  z-index: 2;
+}
+```
+
+### Implement Update Profile Endpoint in `\backend-flask\app.py`
+
+```py
+
+from services.update_profile import *
+
+@app.route("/api/profile/update", methods=['POST','OPTIONS'])
+@cross_origin()
+def data_update_profile():
+  bio          = request.json.get('bio',None)
+  display_name = request.json.get('display_name',None)
+  access_token = extract_access_token(request.headers)
+  try:
+    claims = cognito_jwt_token.verify(access_token)
+    cognito_user_id = claims['sub']
+    UpdateProfile.run(
+      cognito_user_id=cognito_user_id,
+      bio=bio,
+      display_name=display_name
+    )
+    if model['errors'] is not None:
+      return model['errors'], 422
+    else:
+      return model['data'], 200
+  except TokenVerifyError as e:
+    # unauthenicatied request
+    app.logger.debug(e)
+    return {}, 401
+```
+
+### Create new `update_profile.py` service under `backend-flask\services`
+```py
+from lib.db import db
+
+class UpdateProfile:
+  def run(cognito_user_id,bio,display_name):
+    model = {
+      'errors': None,
+      'data': None
+    }
+
+    if display_name == None or len(display_name) < 1:
+      model['errors'] = ['display_name_blank']
+
+    if model['errors']:
+      model['data'] = {
+        'bio': bio,
+        'display_name': display_name
+      }
+    else:
+      handle = UpdateProfile.update_profile(bio,display_name,cognito_user_id)
+      data = UpdateProfile.query_users_short(handle)
+      model['data'] = data
+    return model
+  
+  def update_profile(bio,display_name,cognito_user_id):
+    if bio == None:    
+      bio = ''
+
+    sql = db.template('users','update')
+    handle = db.query_commit(sql,{
+      'cognito_user_id': cognito_user_id,
+      'bio': bio,
+      'display_name': display_name
+    })
+  def query_users_short(handle):
+    sql = db.template('users','short')
+    data = db.query_select_object(sql,{
+      'handle': handle
+    })
+    return data
+```
+
+### Create a `update.sql` under `backend-flask\db\sql\users`
+This query will update the users profile data
+
+```sql
+UPDATE public.users 
+SET 
+  bio = %(bio)s,
+  display_name= %(display_name)s
+WHERE 
+  users.cognito_user_id = %(cognito_user_id)s
+RETURNING handle;
+```
+
+### Create a new file called `migration` under `backend-flask/bin/generate/`
+```py
+#!/usr/bin/env python3
+import time
+import os
+import sys
+
+if len(sys.argv) == 2:
+  name = sys.argv[1]
+else:
+  print("pass a filename: eg. ./bin/generate/migration hello")
+  exit(0)
+
+timestamp = str(time.time()).replace(".","")
+
+filename = f"{timestamp}_{name}.py"
+
+klass = name.replace('_', ' ').title().replace(' ','')
+
+file_content = f"""
+class {klass}Migration(Migration):
+  def migrate_sql():
+    data = \"\"\"
+    \"\"\"
+    return data
+  def rollback_sql():
+    data = \"\"\"
+    \"\"\"
+    return data
+  def migrate():
+    this.query_commit(this.migrate_sql(),{{
+    }})
+  def rollback():
+    this.query_commit(this.rollback_sql(),{{
+    }})
+"""
+file_content = file_content.lstrip('\n').rstrip('\n')
+
+current_path = os.path.dirname(os.path.abspath(__file__))
+file_path = os.path.abspath(os.path.join(current_path, '..', '..','backend-flask','db','migrations',filename))
+print(file_path)
+
+with open(file_path, 'w') as f:
+  f.write(file_content)
+```
+
+### Create a file called `migrate` under `bin\db\`
+
+```shell
+#!/usr/bin/env python3
+
+import os
+import sys
+import glob
+import re
+import time
+import importlib
+
+current_path = os.path.dirname(os.path.abspath(__file__))
+parent_path = os.path.abspath(os.path.join(current_path, '..', '..','backend-flask'))
+sys.path.append(parent_path)
+from lib.db import db
+
+def get_last_successful_run():
+  sql = """
+    SELECT last_successful_run
+    FROM public.schema_information
+    LIMIT 1
+  """
+  return int(db.query_value(sql,{},verbose=False))
+
+def set_last_successful_run(value):
+  sql = """
+  UPDATE schema_information
+  SET last_successful_run = %(last_successful_run)s
+  """
+  db.query_commit(sql,{'last_successful_run': value},verbose=False)
+  return value
+
+last_successful_run = get_last_successful_run()
+
+migrations_path = os.path.abspath(os.path.join(current_path, '..', '..','backend-flask','db','migrations'))
+sys.path.append(migrations_path)
+migration_files = glob.glob(f"{migrations_path}/*")
+
+
+for migration_file in migration_files:
+  filename = os.path.basename(migration_file)
+  module_name = os.path.splitext(filename)[0]
+  match = re.match(r'^\d+', filename)
+  if match:
+    file_time = int(match.group())
+    if last_successful_run <= file_time:
+      mod = importlib.import_module(module_name)
+      print('=== running migration: ',module_name)
+      mod.migration.migrate()
+      timestamp = str(time.time()).replace(".","")
+      last_successful_run = set_last_successful_run(timestamp)
+```
+
+### Create a file called `rollback` under `bin\db\`
+```
+#!/usr/bin/env python3
+
+import os
+import sys
+import glob
+import re
+import time
+import importlib
+
+current_path = os.path.dirname(os.path.abspath(__file__))
+parent_path = os.path.abspath(os.path.join(current_path, '..', '..','backend-flask'))
+sys.path.append(parent_path)
+from lib.db import db
+
+def get_last_successful_run():
+  sql = """
+    SELECT last_successful_run
+    FROM public.schema_information
+    LIMIT 1
+  """
+  return int(db.query_value(sql,{},verbose=False))
+
+def set_last_successful_run(value):
+  sql = """
+  UPDATE schema_information
+  SET last_successful_run = %(last_successful_run)s
+  WHERE id =1
+  """
+  db.query_commit(sql,{'last_successful_run': value})
+  return value
+
+last_successful_run = get_last_successful_run()
+
+migrations_path = os.path.abspath(os.path.join(current_path, '..', '..','backend-flask','db','migrations'))
+sys.path.append(migrations_path)
+migration_files = glob.glob(f"{migrations_path}/*")
+
+
+last_migration_file = None
+for migration_file in migration_files:
+  if last_migration_file == None:
+    filename = os.path.basename(migration_file)
+    module_name = os.path.splitext(filename)[0]
+    match = re.match(r'^\d+', filename)
+    if match:
+      file_time = int(match.group())
+      if last_successful_run > file_time:
+        last_migration_file = module_name
+        mod = importlib.import_module(module_name)
+        print('=== rolling back migration: ',module_name)
+        mod.migration.rollback()
+        set_last_successful_run(file_time)
+```
+
+### Modifying `16822751419807823_add_bio_column.pyadd_bio_column.py` under `backend-flask\db\migrations`
+
+Make use the `bin/generate/migration` is executable and run the following script `./bin/generate/migaration add_bio_column`
+The command will geneate a file called `16822751419807823_add_bio_column.pyadd_bio_column.py` under `backend-flask\db\migrations`
+
+Modify the `16822751419807823_add_bio_column.pyadd_bio_column.py` file with the following code:
+
+```py
+from lib.db import db
+
+class AddBioColumnMigration:
+  def migrate_sql():
+    data = """
+    ALTER TABLE public.users ADD COLUMN bio text;
+    """
+    return data
+  def rollback_sql():
+    data = """
+    ALTER TABLE public.users DROP COLUMN bio;
+    """
+    return data
+
+  def migrate():
+    db.query_commit(AddBioColumnMigration.migrate_sql(),{
+    })
+  def rollback():
+    db.query_commit(AddBioColumnMigration.rollback_sql(),{
+    })
+    
+migration = AddBioColumnMigration
+```
+
+### Create a new table to add to the users profile.
+
+Under `backend-flask\db`, add the following code to the `schema.sql` query
+```sql
+CREATE TABLE IF NOT EXISTS public.schema_information (
+  id integer UNIQUE,
+  last_successful_run text
+);
+INSERT INTO public.schema_information(id,last_successful_run)
+VALUES (1, '0')
+ON CONFLICT (id) DO NOTHING;
+```
+
+### Modify the `db.py` under `backend-flask/lib`
+Locate the following section of the code:
+```py
+  def query_commit (self,sql,params={}):
+    self.print_sql('commit with returning',sql,params)
+```
+Replace with:
+```py
+  def query_commit (self,sql,params={},verbose=True):
+    if verbose:
+      self.print_sql('commit with returning',sql,params)
+```
+
+Locate the following section of the code:
+```py
+  def query_value(self,sql,params={}):
+    self.print_sql('value',sql,params)
+```
+Replace with:
+```py
+  def query_value(self,sql,params={},verbose=True):
+    if verbose:
+      self.print_sql('value',sql,params)
+```
+
+Locate the following section of the code:
+```py
+  def query_array_json(self,sql,params={}):
+    self.print_sql('array',sql,params)
+```
+Replace with:
+```py
+  def query_array_json(self,sql,params={},verbose=True):
+    if verbose:
+      self.print_sql('array',sql,params)
+```
+Locate the following section of the code:
+```py
+  def query_object_json(self,sql,params={}):
+```
+Replace with:
+```py  
+  def query_object_json(self,sql,params={},verbose=True):
+    if verbose:
+      self.print_sql('json',sql,params)
+      self.print_params(params)
+```
+
+Remove the following lines of code from  `app.py`
+
+```py
+   self.print_sql('json',sql,params)
+   self.print_params(params)
+```
+### Add the bio information to users profile
+
+Modify the `profileheading.js` located in  `frontend-react-js/src/components`
+
+```js
+    <div class="bio" >{props.profile.bio}</div>
+```
+
+Modify the `profileheading.css` located in  `frontend-react-js/src/components`
+```css
+  .profile_heading .cruds_count {
+    color: rgba(255,255,255,0.7);
+  }
+
+  .profile_heading .bio {
+    padding: 16px;
+    color: rgb(255,255,255,0.7);
+```
