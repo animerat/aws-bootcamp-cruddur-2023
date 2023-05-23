@@ -1679,16 +1679,26 @@ end # def handler
 1) Goto AWS-->Lambda, click on the Create Function button
 2) Click on Create distribution
 3) Fill out the Create Function with the following information:
+
     a) Function name: CruddurAvatarUploads
+    
     b) Runtime: Ruby 2.7
+    
     c) Architecture: x86_64
+    
     d) Execution Role: Crate a new role with basic Lambda Permissions
+    
 ![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_Create.png)
+
 4) Rename the function from lambda_functions.rb ro function.rb
+
 ![Image of 8 Week CF_Origin_Access](assests/8_Week_Lambda_Rename.png)
+
 5) Copy and paste the code from the `aws/lambdas/cruddur-upload-avatar/function.rb` from your GitHub Repo.
 6) Goto Configuration-->Permissions, and click on the Role name
+
 ![Image of 8 Week CF_Create_Control_Setting](assests/8_Week_Lambda_Role.png)
+
 7) Click on Add Permisions, and select Create inline policy
  
 ![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_Create_Inline.png)
@@ -1703,8 +1713,149 @@ end # def handler
 12) Goto AWS-->Lambda
 13) Goto Configuration-->Environment Variables
 14) Click on Edit
-15) Fill out the Environment variables with the following information:
+
+16) Fill out the Environment variables with the following information:
      a) Key: UPLOADS_BUCKET_NAME
-     b) Value:<cruddur uploaded avatars bucket name>
+     b) Value: `cruddur uploaded avatars bucket name`
+     
 ![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_env_vars.png)
 
+### Create an API Gateway Lambda Authorizer
+    
+#### Create a file called `index.js` under `aws/lambdas/lambda-authorizer/`
+```js
+"use strict";
+const { CognitoJwtVerifier } = require("aws-jwt-verify");
+//const { assertStringEquals } = require("aws-jwt-verify/assert");
+
+const jwtVerifier = CognitoJwtVerifier.create({
+  userPoolId: process.env.USER_POOL_ID,
+  tokenUse: "access",
+  clientId: process.env.CLIENT_ID //,
+  //customJwtCheck: ({ payload }) => {
+  //  assertStringEquals("e-mail", payload["email"], process.env.USER_EMAIL);
+  //},
+});
+
+exports.handler = async (event) => {
+  console.log("request:", JSON.stringify(event, undefined, 2));
+  
+  const auth = event.headers.authorization;
+  const jwt = auth.split(" ")[1]
+ 
+  try {
+    const payload = await jwtVerifier.verify(jwt);
+    console.log("Access allowed. JWT payload:", payload);
+  } catch (err) {
+    console.error("Access forbidden:", err);
+    return {
+      isAuthorized: false,
+    };
+  }
+  return {
+    isAuthorized: true,
+  };
+};
+```
+
+#### Creating an AWS JWT Verify lambda package
+
+ **(Note:You will need your Cognito Client ID and User Pool ID)**
+1) Under `aws/lambdas/lambda-authorizer/`, install the AWS JWT Verify package by running `npm install aws-jwt-verify --save`
+2) You will need to download the all files under `aws/lambdas/lambda-authorizer/` 
+3) You will then need to zip up the files before uploading them to AWS Lambda
+4) Goto-->Lambda
+5) Click on Create distribution
+6) Fill out the Create Function with the following information: 
+
+    a) Function name: CruddurAPIGatewayLambdaAuthorizer
+    
+    b) Runtime: Node.js 18.x
+    
+    c) Architecture: x86_64
+    
+    d) Execution Role: Crate a new role with basic Lambda Permissions
+    
+![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_API_Gateway_Authorizer.png)
+7) Click on Upload from, and select the zip option 
+
+![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_API_Gateway_Authorizer_ZIP.png)
+
+8)  Goto Configuration-->Environment Variables
+9)  Click on Edit
+10)  Fill out the Environment variables with the following information:
+
+     a) Key: CLIENT_ID
+     
+     b) Value: **Your Cognito Pool Client ID**
+     
+     c) Key: USER_POOL_ID
+     
+     d) Value: **Your Cognito User Pool ID**
+     
+![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_API_Gateway_EnvVars.png)
+
+#### Create API Gateway to Attach to AWS JWT Verify lambda
+
+1) Goto API Gateway
+2) Click on Create API
+3) Click on Build HTTP API
+4) Click on Add Integration
+5) Under Integrations, click on the drop down and select Lambda
+6) under Lambda Function, click on the drop down and CruddurAvatarUpload
+7) Under API name, enter `api.your domain name`
+
+![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_API_Gateway_Integrations.png)
+
+8) Click Next
+9) Configure routes with the following information
+    
+    a) Method:Post
+    
+    b) Resource Path: /avatars/key_upload
+    
+    c) Inegration Target: CruddurAvatarUpload
+    
+    d) Method: Options
+    
+    e) Resource Path: /{proxy+}
+    
+    f) Inegration Target: CruddurAvatarUpload    
+    
+![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_API_Gateway_Configure_Routes.png)
+
+10) Click Next 
+11) Click Next
+12) Click Create
+**(Note: You will be taken back to API Gateway that you just created, We will be adding a new route to this API Gateway)**
+13) Click on Authorization
+14) Click on Manage Authorizers
+15) Click on Create
+16) Configure the Create Authorizer with the following information:
+
+    a) Under Authorizer type, select Lambda
+    
+    b) Under Name, enter CruddurJWTAuthorizer
+    
+    c) Under Lambda Function, select CruddurAPIGaterwayLambdaAuthorizer
+    
+    d) Set Authorizer caching to disable
+    
+    e) click on create
+    
+![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_API_Gateway_Create_Authorizer.png)
+
+17) Click on Attach authorizers to routes
+18) Select Post, and click on attach authorizer
+19) Select CruddurJWTAuthorizer
+20) Click on Save
+
+
+     
+
+
+
+
+
+
+    
