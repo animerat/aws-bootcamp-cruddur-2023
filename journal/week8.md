@@ -1489,3 +1489,222 @@ Modify the `profileheading.css` located in  `frontend-react-js/src/components`
     padding: 16px;
     color: rgb(255,255,255,0.7);
 ```
+## Implement Uploading Avatars Images
+
+### Modify the `ProfileForm.js` under `frontend-react-js\src\components`
+
+Locate the following section of the code:
+```js
+  const [bio, setBio] = React.useState(0);
+  const [displayName, setDisplayName] = React.useState(0);
+```
+Replace with:
+```js
+  const [bio, setBio] = React.useState('');
+  const [displayName, setDisplayName] = React.useState('');
+```
+
+Locate the following section of the code:
+```js
+    console.log('useEffects',props)
+    setBio(props.profile.bio);
+```
+Replace with:
+```js
+    setBio(props.profile.bio || '');
+```
+
+Locate the following section of the code:
+```js
+          <div class="popup_heading">
+            <div class="popup_title">Edit Profile</div>
+```
+Replace with:
+```js
+          <div className="popup_heading">
+            <div className="popup_title">Edit Profile</div>
+```
+### Add code to upload data to S3. 
+In `ProfileForm.js` under `frontend-react-js\src\components`
+
+```js
+  const s3uploadkey = async (extension)=> {
+    console.log('ext',extension)
+    try {
+      const gateway_url = `${process.env.REACT_APP_API_GATEWAY_ENDPOINT_URL}/avatars/key_upload`
+      await getAccessToken()
+      const access_token = localStorage.getItem("access_token")
+      const json = {
+        extension: extension
+      }
+      const res = await fetch(gateway_url, {
+        method: "POST",
+        body: JSON.stringify(json),
+        headers: {
+          'Origin': process.env.REACT_APP_FRONTEND_URL,
+          'Authorization': `Bearer ${access_token}`,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      })
+      let data = await res.json();
+      if (res.status === 200) {
+        return data.url
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  }
+  const s3upload = async (event)=> {
+    console.log('event',event)
+    const file = event.target.files[0]
+    const filename = file.name
+    const size = file.size
+    const type = file.type
+    const preview_image_url = URL.createObjectURL(file)
+    console.log(filename,size,type)
+    const fileparts = filename.split('.')
+    const extension = fileparts[fileparts.length-1]
+    const presignedurl = await s3uploadkey(extension)
+    try {
+      console.log('s3upload')
+      const res = await fetch(presignedurl, {
+        method: "PUT",
+        body: file,
+        headers: {
+          'Content-Type': type
+      }})
+      if (res.status === 200) {
+        
+      } else {
+        console.log(res)
+      }
+    } catch (err) {
+      console.log(err);
+    }
+  }
+```
+
+```js
+          <div className="popup_content">       
+          <input type="file" name="avatarupload" onChange={s3upload} />
+            <div className="field display_name">
+```
+
+### Create Lambda Function that creates a presigned URL to upload avatar images
+
+#### Generate a gemfile with libraries
+
+1) Goto `aws/lambdas/cruddur-upload-avatar`
+2) Run the following command: `bundle init`
+3) Add the following libraries to the gem filte
+```ruby
+gem "aws-sdk-s3"
+gem "ox"
+gem "jwt"
+```
+
+#### Under `aws/lambdas/cruddur-upload-avatar`, create a file called `function.rb`
+
+```ruby
+require 'aws-sdk-s3'
+require 'json'
+require 'jwt'
+
+def handler(event:, context:)
+  puts event
+  # return cors headers for preflight check
+  if event['routeKey'] == "OPTIONS /{proxy+}"
+    puts({step: 'preflight', message: 'preflight CORS check'}.to_json)
+    { 
+      headers: {
+        "Access-Control-Allow-Headers": "*, Authorization",
+        "Access-Control-Allow-Origin": "https://*.gitpod.io",
+        "Access-Control-Allow-Methods": "OPTIONS,GET,POST"
+      },
+      statusCode: 200
+    }
+  else
+    token = event['headers']['authorization'].split(' ')[1]
+    puts({step: 'presignedurl', access_token: token}.to_json)
+
+    body_hash = JSON.parse(event["body"])
+    extension = body_hash["extension"]
+
+    decoded_token = JWT.decode token, nil, false
+    cognito_user_uuid = decoded_token[0]['sub']
+
+    s3 = Aws::S3::Resource.new
+    bucket_name = ENV["UPLOADS_BUCKET_NAME"]
+    object_key = "#{cognito_user_uuid}.#{extension}"
+
+    puts({object_key: object_key}.to_json)
+
+    obj = s3.bucket(bucket_name).object(object_key)
+    url = obj.presigned_url(:put, expires_in: 60 * 5)
+    url # this is the data that will be returned
+    body = {url: url}.to_json
+    { 
+      headers: {
+        "Access-Control-Allow-Headers": "*, Authorization",
+        "Access-Control-Allow-Origin": "*.gitpod.io",
+        "Access-Control-Allow-Methods": "OPTIONS,GET,POST"
+      },
+      statusCode: 200, 
+      body: body 
+    }
+  
+  end # if 
+end # def handler
+```
+
+#### Under `aws/policies/`, create a file called `s3-upload-avatar-presigned-url-policy.json`
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "VisualEditor0",
+            "Effect": "Allow",
+            "Action": "s3:PutObject",
+            "Resource": "arn:aws:s3:::<cruddur uploaded avatars bucket name>/*"
+        }
+    ]
+}
+```
+#### Create AvatarUpload Function
+
+1) Goto AWS-->Lambda, click on the Create Function button
+2) Click on Create distribution
+3) Fill out the Create Function with the following information:
+    a) Function name: CruddurAvatarUploads
+    b) Runtime: Ruby 2.7
+    c) Architecture: x86_64
+    d) Execution Role: Crate a new role with basic Lambda Permissions
+![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_Create.png)
+4) Rename the function from lambda_functions.rb ro function.rb
+![Image of 8 Week CF_Origin_Access](assests/8_Week_Lambda_Rename.png)
+5) Copy and paste the code from the `aws/lambdas/cruddur-upload-avatar/function.rb` from your GitHub Repo.
+6) Goto Configuration-->Permissions, and click on the Role name
+![Image of 8 Week CF_Create_Control_Setting](assests/8_Week_Lambda_Role.png)
+7) Click on Add Permisions, and select Create inline policy
+ 
+![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_Create_Inline.png)
+
+8) Copy and paste the code from the `aws/policies/s3-upload-avatar-presigned-url-policy.json` from your GitHub Repo.
+9) Click on Review Policy
+10) In the name field, enter **PresignedUrlAvatarPolicy**
+
+![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_InlinePolicyName.png)
+
+11) Click on Create Policy
+12) Goto AWS-->Lambda
+13) Goto Configuration-->Environment Variables
+14) Click on Edit
+15) Fill out the Environment variables with the following information:
+     a) Key: UPLOADS_BUCKET_NAME
+     b) Value:<cruddur uploaded avatars bucket name>
+![Image of 8 Week CF_Origin_Domain](assests/8_Week_Lambda_env_vars.png)
+
