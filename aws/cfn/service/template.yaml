@@ -70,7 +70,25 @@ Parameters:
     Default: 'arn:aws:ssm:us-west-2:623491699425:parameter/cruddur/backend-flask/OTEL_EXPORTER_OTLP_HEADERS'
   
 Resources:
+  ServiceSG:
+    # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-security-group.html
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "${AWS::StackName}AlbSG"
+      GroupDescription: Public Facing SG for our Cruddur ALB
+      VpcId:
+        Fn::ImportValue:
+          !Sub ${NetworkingStack}VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          SourceSecurityGroupId:
+            Fn::ImportValue:
+              !Sub ${ClusterStack}ALBSecurityGroupId
+          FromPort: 80
+          ToPort: 80
+          Description: ALB HTTP
   FargateService:
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-ecs-service.html
     Type: AWS::ECS::Service
     Properties:
       Cluster:
@@ -81,7 +99,7 @@ Resources:
       DesiredCount: 1
       EnableECSManagedTags: true
       EnableExecuteCommand: true
-      HealthCheckGracePeriodSeconds: 0
+      HealthCheckGracePeriodSeconds: 100
       LaunchType: FARGATE
       LoadBalancers:
         - TargetGroupArn:
@@ -93,8 +111,7 @@ Resources:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
           SecurityGroups:
-            - Fn::ImportValue:
-                !Sub "${ClusterStack}ServiceSecurityGroupId"
+            - !GetAtt ServiceSG.GroupId
           Subnets:
             Fn::Split:
               - ","
@@ -105,8 +122,6 @@ Resources:
       ServiceConnectConfiguration:
         Enabled: true
         Namespace: "cruddur"
-        # TODO - If you want to log
-        # LogConfiguration
         Services:
           - DiscoveryName: backend-flask
             PortName: backend-flask
@@ -119,7 +134,6 @@ Resources:
       #    ContainerPort: !Ref ContainerPort
       ServiceName: !Ref ServiceName
       TaskDefinition: !Ref TaskDefinition
-
   TaskDefinition:
     Type: 'AWS::ECS::TaskDefinition'
     Properties:
@@ -249,3 +263,8 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
         - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+Outputs:
+  ServiceSecurityGroupId:
+    Value: !GetAtt ServiceSG.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}ServiceSecurityGroupId"
