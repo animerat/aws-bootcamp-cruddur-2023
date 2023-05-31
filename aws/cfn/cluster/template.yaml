@@ -59,7 +59,7 @@ Parameters:
     Default: "/api/health-check"
   BackendHealthCheckPort:
     Type: String
-    Default: 80
+    Default: 4567
   BackendHealthCheckProtocol:
     Type: String
     Default: HTTP
@@ -197,7 +197,6 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       #Name: !Sub "${AWS::StackName}BackendTG"
-      Port: !Ref BackendPort
       HealthCheckEnabled: true
       HealthCheckProtocol: !Ref BackendHealthCheckProtocol
       HealthCheckIntervalSeconds: !Ref BackendHealthCheckIntervalSeconds
@@ -206,6 +205,7 @@ Resources:
       HealthCheckTimeoutSeconds: !Ref BackendHealthCheckTimeoutSeconds
       HealthyThresholdCount: !Ref BackendHealthyThresholdCount
       UnhealthyThresholdCount: !Ref BackendUnhealthyThresholdCount
+      Port: !Ref BackendPort
       IpAddressType: ipv4
       Matcher: 
         HttpCode: 200

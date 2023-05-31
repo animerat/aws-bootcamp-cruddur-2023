@@ -44,7 +44,7 @@ Resources:
   RDSPostgresSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: !Sub "${AWS::StackName}AlbSG"
+      GroupName: !Sub "${AWS::StackName}RDSSG"
       GroupDescription: Public Facing SG for our Cruddur ALB
       VpcId:
         Fn::ImportValue:
