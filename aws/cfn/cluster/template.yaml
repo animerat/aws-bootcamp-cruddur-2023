@@ -151,7 +151,7 @@ Resources:
         - Field: host-header
           HostHeaderConfig: 
             Values: 
-              - api.cruddur.com
+              - api.helloeworld.io
       Actions: 
         - Type: forward
           TargetGroupArn:  !Ref BackendTG
