@@ -1,0 +1,8 @@
+[deploy]
+bucket = 'cfn-artifacts-helloeworld-io'
+region = 'us-west-2'
+stack_name = 'CrdSrvBackendFlask'
+
+[parameters]
+EnvFrontendUrl = 'https://helloeworld.io'
+EnvBackendUrl = 'https://api.helloeworld.io'

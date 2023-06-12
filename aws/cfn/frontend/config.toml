@@ -1,0 +1,9 @@
+[deploy]
+bucket = 'cfn-artifacts-helloeworld-io'
+region = 'us-west-2'
+stack_name = 'CrdFrontend'
+
+[parameters]
+CertificateArn = 'arn:aws:acm:us-east-1:623491699425:certificate/efb35a4d-b374-4ac4-9461-6da5162f9abe'
+WwwBucketName = 'www.helloeworld.io'
+RootBucketName = 'helloeworld.io'

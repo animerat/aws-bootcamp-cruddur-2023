@@ -11,8 +11,8 @@ echo "TASK ID : $TASK_ID"
 echo "Container Name: $CONTAINER_NAME"
 
 aws ecs execute-command  \
---region $AWS_DEFAULT_REGION \cd 
---cluster cruddur \
+--region $AWS_DEFAULT_REGION \
+--cluster CrdClusterFargateCluster \
 --task $TASK_ID \
 --container $CONTAINER_NAME \
 --command "/bin/bash" \
